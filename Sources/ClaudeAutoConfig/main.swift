@@ -286,7 +286,7 @@ class AppMonitor {
             object: nil
         )
         
-        Logger.shared.info("🚀 ClaudeAutoConfig started - monitoring \(Config.targetBundleID)")
+        Logger.shared.info("🚀 ClaudeAutoConfig started - monitoring Claude Desktop & Claude Code")
         Preferences.printCurrentSettings()
         loadSecrets()
     }
@@ -332,11 +332,12 @@ class AppMonitor {
     
     @objc private func appDidLaunch(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              app.bundleIdentifier == Config.targetBundleID else {
+              app.bundleIdentifier == Config.claudeDesktopBundleID else {
             return
         }
         
-        Logger.shared.info("✅ \(app.localizedName ?? "App") LAUNCHED")
+        Logger.shared.info("✅ Claude Desktop (\(app.localizedName ?? "App")) LAUNCHED")
+        Logger.shared.info("🔍 DEBUG: appDidLaunch triggered - calling runScript(phase: \"launch\")")
         
         // Run pre-launch script
         runScript(phase: "launch")
@@ -371,10 +372,13 @@ class AppMonitor {
     }
     
     private func runScript(phase: String) {
+        Logger.shared.info("🔍 DEBUG: runScript called with phase: \(phase)")
         switch phase {
         case "launch":
+            Logger.shared.info("🔍 DEBUG: runScript calling processTemplate()")
             processTemplate()
         case "quit":
+            Logger.shared.info("🔍 DEBUG: runScript calling restoreTemplate()")
             restoreTemplate()
         default:
             break
@@ -395,6 +399,8 @@ class AppMonitor {
         let desktopRunning = isClaudeDesktopRunning()
         let codeRunning = isClaudeCodeRunning()
         
+        Logger.shared.info("🔍 DEBUG: Periodic check - Claude Desktop running: \(desktopRunning), Claude Code running: \(codeRunning)")
+        
         // Check for new process launches that need config creation
         checkForNewProcessLaunches(desktopRunning: desktopRunning, codeRunning: codeRunning)
         
@@ -409,8 +415,17 @@ class AppMonitor {
             let outputPath = Preferences.targetClaudeDesktopConfigFile.expandingTildeInPath
             
             if FileManager.default.fileExists(atPath: outputPath) {
-                Logger.shared.warning("⚠️  Found orphaned config file with no Claude apps running - cleaning up")
-                cleanupOrphanedConfig()
+                // Add delay to avoid race condition with config creation
+                let configModifiedTime = (try? FileManager.default.attributesOfItem(atPath: outputPath)[.modificationDate] as? Date) ?? Date.distantPast
+                let timeSinceModified = Date().timeIntervalSince(configModifiedTime)
+                
+                // Only cleanup if config is older than 3 seconds (avoids race condition)
+                if timeSinceModified > 3.0 {
+                    Logger.shared.warning("⚠️  Found orphaned Claude config (age: \(Int(timeSinceModified))s) with no Claude apps running - cleaning up")
+                    cleanupOrphanedConfig()
+                } else {
+                    Logger.shared.info("ℹ️  Config recently created (\(Int(timeSinceModified))s ago) - skipping cleanup to avoid race condition")
+                }
             }
         }
     }
@@ -421,6 +436,26 @@ class AppMonitor {
         
         // Check for new processes (not in lastSeenProcesses)
         let newProcesses = currentProcesses.subtracting(lastSeenProcesses)
+        let terminatedProcesses = lastSeenProcesses.subtracting(currentProcesses)
+        
+        Logger.shared.info("🔍 DEBUG: checkForNewProcessLaunches - current: \(currentProcesses), last seen: \(lastSeenProcesses), new: \(newProcesses), terminated: \(terminatedProcesses)")
+        
+        // Handle process terminations
+        if !terminatedProcesses.isEmpty {
+            Logger.shared.info("🔍 Claude Code process terminated: \(terminatedProcesses)")
+            
+            // Check if Claude Desktop is still running
+            if desktopRunning {
+                Logger.shared.info("ℹ️  Claude Desktop is still running - config preserved")
+                if Preferences.voiceNotifications {
+                    Logger.shared.info("🔊 Voice notification: Claude Desktop is running - Config preserved")
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+                    process.arguments = ["Claude Desktop is running - Config preserved"]
+                    try? process.run()
+                }
+            }
+        }
         
         if !newProcesses.isEmpty {
             Logger.shared.info("🔍 New \(Config.claudeCodeProcessName) process detected: \(newProcesses)")
@@ -431,7 +466,7 @@ class AppMonitor {
             
             if !configExists {
                 // No config exists - create it for the new process
-                Logger.shared.info("🚀 No config exists - creating for new \(Config.claudeCodeProcessName) process")
+                Logger.shared.info("🚀 No config exists - creating for new Claude Code process")
                 
                 // Refresh UserDefaults to pick up any external changes
                 UserDefaults.standard.synchronize()
@@ -481,6 +516,15 @@ class AppMonitor {
                 }
             } else {
                 Logger.shared.info("ℹ️  Config already exists - no need to create for new process")
+                
+                // Voice notification when Claude Code starts but config already exists
+                if Preferences.voiceNotifications {
+                    Logger.shared.info("🔊 Voice notification: Claude configuration in place")
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+                    process.arguments = ["Claude configuration in place"]
+                    try? process.run()
+                }
             }
         }
         
@@ -549,9 +593,11 @@ class AppMonitor {
             
             // Announce success with voice if enabled
             if Preferences.voiceNotifications {
+                Logger.shared.info("🔊 Voice notification: Configuration created for \(appType) process")
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-                process.arguments = ["Configuration created for process"]
+                let message = appType == "ClaudeCode" ? "Configuration created for Claude Code process" : "Configuration created for \(appType) process"
+                process.arguments = [message]
                 try process.run()
             }
             
@@ -570,12 +616,13 @@ class AppMonitor {
         
         do {
             try FileManager.default.removeItem(at: outputURL)
-            Logger.shared.success("🗑️  Cleaned up orphaned config: \(outputPath)")
+            Logger.shared.success("🗑️  Cleaned up orphaned Claude config: \(outputPath)")
             
             if Preferences.voiceNotifications {
+                Logger.shared.info("🔊 Voice notification: Claude configuration cleaned")
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-                process.arguments = ["Orphaned config cleaned"]
+                process.arguments = ["Claude configuration cleaned"]
                 try? process.run()
             }
         } catch {
@@ -690,9 +737,13 @@ class AppMonitor {
     }
     
     private func processTemplate() {
+        Logger.shared.info("🔍 DEBUG: processTemplate() started")
+        
         // Determine app type and get appropriate settings
         let appType = getAppType()
         let (managementEnabled, templatePath, outputPath) = getAppSettings(for: appType)
+        
+        Logger.shared.info("🔍 DEBUG: appType=\(appType), managementEnabled=\(managementEnabled)")
         
         if !managementEnabled {
             Logger.shared.info("ℹ️  Config management disabled for \(appType) - skipping template processing")
@@ -706,10 +757,10 @@ class AppMonitor {
         if configExists {
             Logger.shared.info("ℹ️  Configuration already exists - no need to recreate")
             if Preferences.voiceNotifications {
-                Logger.shared.info("🔊 Voice notification: Configuration in place")
+                Logger.shared.info("🔊 Voice notification: Claude configuration in place")
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-                process.arguments = ["Configuration in place"]
+                process.arguments = ["Claude configuration in place"]
                 try? process.run()
             }
             return
@@ -734,11 +785,14 @@ class AppMonitor {
             
             // Announce success with voice if enabled
             if Preferences.voiceNotifications {
-                Logger.shared.info("🔊 Voice notification: Configuration injected")
+                Logger.shared.info("🔊 Voice notification: Claude Desktop configuration injected")
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-                process.arguments = ["Configuration injected"]
+                process.arguments = ["Claude Desktop configuration injected"]
+                Logger.shared.info("🔍 DEBUG: About to call say process...")
                 try process.run()
+                process.waitUntilExit()
+                Logger.shared.info("🔍 DEBUG: Say process completed with exit code: \(process.terminationStatus)")
             }
             
         } catch {
@@ -767,10 +821,12 @@ class AppMonitor {
         if otherAppRunning {
             Logger.shared.info("🔄 Other Claude app is still running - keeping config intact")
             if Preferences.voiceNotifications {
-                Logger.shared.info("🔊 Voice notification: Config preserved for other app")
+                let otherAppName = appType == "ClaudeDesktop" ? "Claude Code" : "Claude Desktop"
+                let message = "\(otherAppName) is running - Config preserved"
+                Logger.shared.info("🔊 Voice notification: \(message)")
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-                process.arguments = ["Config preserved for other app"]
+                process.arguments = [message]
                 try? process.run()
             }
             // DON'T reset injection state - keep it so periodic cleanup won't delete
@@ -796,10 +852,10 @@ class AppMonitor {
             
             // Announce success with voice if enabled
             if Preferences.voiceNotifications {
-                Logger.shared.info("🔊 Voice notification: Configuration cleaned")
+                Logger.shared.info("🔊 Voice notification: Claude configuration cleaned")
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-                process.arguments = ["Configuration cleaned"]
+                process.arguments = ["Claude configuration cleaned"]
                 try process.run()
             }
             
@@ -819,6 +875,38 @@ class AppMonitor {
 }
 
 // MARK: - Main
+
+// Check for existing instances to prevent duplicates
+let task = Process()
+task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+task.arguments = ["-f", "ClaudeAutoConfig"]
+
+let pipe = Pipe()
+task.standardOutput = pipe
+task.standardError = Pipe()
+
+do {
+    try task.run()
+    task.waitUntilExit()
+    
+    if task.terminationStatus == 0 {
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        let processes = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .newlines)
+            .filter { !$0.isEmpty }
+        
+        // If more than 1 process (current process), exit
+        if processes.count > 1 {
+            print("❌ ClaudeAutoConfig is already running (PID: \(processes.first ?? "unknown"))")
+            print("   Kill existing instance with: kill \(processes.first ?? "")")
+            exit(1)
+        }
+    }
+} catch {
+    // Continue if check fails
+}
+
 let monitor = AppMonitor()
 
 // Keep the RunLoop alive

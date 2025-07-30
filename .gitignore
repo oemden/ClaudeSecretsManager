@@ -1,2 +1,57 @@
-.vscode
+# IDE
+.vscode/
+.idea/
+*.xcworkspace/
+*.xcodeproj/
+
+# Swift build artifacts
+.build/
+.swiftpm/
+Package.resolved
+DerivedData/
+
+# Xcode
+xcuserdata/
+*.xcuserdatad
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.pbxuser
+!default.pbxuser
+*.xccheckout
+*.xcscmblueprint
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Secrets and sensitive data
 claude_secrets
+secrets/claude_secrets
+*.key
+*.pem
+*.p12
+*.keychain
+
+# Local testing files
+test_*.swift
+*.log
+*.tmp
+
+# Build outputs
+ClaudeAutoConfig
+*.dSYM/
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# Temporary files
+.tmp/
+tmp/

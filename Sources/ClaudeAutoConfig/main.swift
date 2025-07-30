@@ -1311,6 +1311,733 @@ do {
     // Continue if check fails
 }
 
+// MARK: - CLI Command Processing
+struct CLICommands {
+    static func showHelp() {
+        print("""
+        ClaudeAutoConfig - Claude Desktop & Claude Code Configuration Manager
+        
+        USAGE:
+            claudeautoconfig [OPTIONS]
+            claudeautoconfig [COMMAND] [ARGUMENTS]
+        
+        OPTIONS:
+            -h, --help                     Show this help message
+            -s, --status                   Show current daemon and configuration status
+            -c, --config                   Show current configuration settings
+            -v, --voice [on|off]          Enable/disable voice notifications
+            -n, --notifications [on|off]  Enable/disable macOS notifications
+        
+        COMMANDS:
+            -a, --add VAR=VALUE           Add secret(s) to configuration
+                                         Multiple: VAR1=VALUE1,VAR2=VALUE2
+                                         Or: VAR1=VALUE1 VAR2=VALUE2
+            -d, --delete VAR              Delete secret(s) from configuration
+                                         Multiple: VAR1,VAR2 or VAR1 VAR2
+            -m, --mechanism [file|keychain] Set storage mechanism for secrets
+                                         (use with --add/--delete)
+            -t, --template                Create template from current Claude config
+            -r, --reset                   Reset to default ClaudeAutoConfig settings
+            -I, --install                 Install LaunchAgent plist (doesn't start)
+            -U, --uninstall               Remove LaunchAgent plist (stops if running)
+            -E, --enable                  Enable and start LaunchAgent daemon
+            -D, --disable                 Disable and stop LaunchAgent daemon
+            -R, --restore                 Restore original Claude config and disable daemon
+        
+        EXAMPLES:
+            claudeautoconfig --add API_KEY=abc123 -m file
+            claudeautoconfig -a VAR1=val1,VAR2=val2 -m keychain
+            claudeautoconfig --delete API_KEY -m file
+            claudeautoconfig --voice on
+            claudeautoconfig --install
+            claudeautoconfig --enable
+            claudeautoconfig --status
+            claudeautoconfig --disable
+        
+        COMPLEX VALUES (use single quotes to protect special characters):
+            claudeautoconfig -a 'API_URL=https://api.example.com/v1' -m file
+            claudeautoconfig -a 'PASSWORD=P@ssw0rd123!&$' -m file
+            claudeautoconfig -a 'MULTI=val1,API_URL=https://example.com' -m file
+        
+        ALTERNATIVE METHODS for complex values:
+            # Method 1: Single quotes (recommended)
+            claudeautoconfig -a 'DB_PASS=Very%$#@Complex!' -m file
+            
+            # Method 2: Double quotes with escaping  
+            claudeautoconfig -a "DB_PASS=Very%\\$#@Complex\\!" -m file
+            
+            # Method 3: Interactive mode (future feature)
+            claudeautoconfig --add-interactive -m file
+        
+        CONFIGURATION:
+            Secrets file: \(Preferences.secretsFile)
+            Template file: \(Preferences.templateClaudeDesktopConfigFile)
+            Voice notifications: \(Preferences.voiceNotifications ? "enabled" : "disabled")
+            macOS notifications: \(Preferences.macosNotifications ? "enabled" : "disabled")
+        """)
+    }
+    
+    static func parseArguments(_ args: [String]) -> Bool {
+        guard !args.isEmpty else {
+            // No arguments - check if running via LaunchAgent
+            if ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] != nil ||
+               ProcessInfo.processInfo.environment["LAUNCH_AGENT"] != nil ||
+               ProcessInfo.processInfo.environment["USER"] == nil {
+                // Running via LaunchAgent - run as daemon
+                return false
+            } else {
+                // Running manually - show help
+                showHelp()
+                return true
+            }
+        }
+        
+        var i = 0
+        var mechanism: String = Preferences.secretsMechanism
+        
+        while i < args.count {
+            let arg = args[i]
+            
+            switch arg {
+            case "-h", "--help":
+                showHelp()
+                return true
+                
+            case "-s", "--status":
+                showStatus()
+                return true
+                
+            case "-c", "--config":
+                showConfig()
+                return true
+                
+            case "-v", "--voice":
+                if i + 1 < args.count {
+                    let value = args[i + 1]
+                    setVoiceNotifications(enabled: value == "on" || value == "true")
+                    i += 1
+                } else {
+                    print("❌ --voice requires a value: on|off")
+                    return true
+                }
+                
+            case "-n", "--notifications":
+                if i + 1 < args.count {
+                    let value = args[i + 1]
+                    setMacOSNotifications(enabled: value == "on" || value == "true")
+                    i += 1
+                } else {
+                    print("❌ --notifications requires a value: on|off")
+                    return true
+                }
+                
+            case "-m", "--mechanism":
+                if i + 1 < args.count {
+                    mechanism = args[i + 1]
+                    if mechanism != "file" && mechanism != "keychain" {
+                        print("❌ --mechanism must be 'file' or 'keychain'")
+                        return true
+                    }
+                    i += 1
+                } else {
+                    print("❌ --mechanism requires a value: file|keychain")
+                    return true
+                }
+                
+            case "-a", "--add":
+                if i + 1 < args.count {
+                    let secrets = parseSecrets(args[i + 1])
+                    addSecrets(secrets, mechanism: mechanism)
+                    i += 1
+                } else {
+                    print("❌ --add requires secrets in format: VAR=VALUE or VAR1=VALUE1,VAR2=VALUE2")
+                    return true
+                }
+                
+            case "--add-interactive":
+                addSecretsInteractive(mechanism: mechanism)
+                
+            case "-d", "--delete":
+                if i + 1 < args.count {
+                    let variables = parseVariables(args[i + 1])
+                    deleteSecrets(variables, mechanism: mechanism)
+                    i += 1
+                } else {
+                    print("❌ --delete requires variable names: VAR or VAR1,VAR2")
+                    return true
+                }
+                
+            case "-t", "--template":
+                createTemplate()
+                
+            case "-r", "--reset":
+                resetSettings()
+                return true
+                
+            case "-I", "--install":
+                installLaunchAgent()
+                return true
+                
+            case "-U", "--uninstall":
+                uninstallLaunchAgent()
+                return true
+                
+            case "-E", "--enable":
+                enableLaunchAgent()
+                return true
+                
+            case "-D", "--disable":
+                disableLaunchAgent()
+                return true
+                
+            case "--run-daemon":
+                // Hidden parameter for LaunchAgent - run as daemon
+                return false
+                
+            case "-R", "--restore":
+                restoreOriginalConfig()
+                
+                
+            default:
+                print("❌ Unknown argument: \(arg)")
+                print("Use --help for usage information")
+                return true
+            }
+            
+            i += 1
+        }
+        
+        return true // Arguments processed, exit
+    }
+    
+    // Helper functions for CLI commands
+    static func parseSecrets(_ input: String) -> [String: String] {
+        var secrets: [String: String] = [:]
+        let pairs = input.contains(",") ? input.components(separatedBy: ",") : [input]
+        
+        for pair in pairs {
+            let parts = pair.components(separatedBy: "=")
+            if parts.count >= 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespaces)
+                // Join all parts after the first "=" to handle values containing "="
+                let value = parts.dropFirst().joined(separator: "=").trimmingCharacters(in: .whitespaces)
+                secrets[key] = value
+            } else {
+                print("⚠️  Skipping invalid secret format: '\(pair)'")
+                print("   Expected format: KEY=VALUE")
+            }
+        }
+        
+        return secrets
+    }
+    
+    static func parseVariables(_ input: String) -> [String] {
+        return input.contains(",") ? 
+            input.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) } :
+            [input.trimmingCharacters(in: .whitespaces)]
+    }
+    
+    static func setVoiceNotifications(enabled: Bool) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        process.arguments = ["write", "com.oemden.claudeautoconfig", "voice_notifications", "-bool", enabled ? "true" : "false"]
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            print("✅ Voice notifications \(enabled ? "enabled" : "disabled")")
+        } catch {
+            print("❌ Failed to set voice notifications: \(error.localizedDescription)")
+        }
+    }
+    
+    static func setMacOSNotifications(enabled: Bool) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        process.arguments = ["write", "com.oemden.claudeautoconfig", "macos_notifications", "-bool", enabled ? "true" : "false"]
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            print("✅ macOS notifications \(enabled ? "enabled" : "disabled")")
+        } catch {
+            print("❌ Failed to set macOS notifications: \(error.localizedDescription)")
+        }
+    }
+    
+    static func addSecrets(_ secrets: [String: String], mechanism: String) {
+        print("🔐 Adding \(secrets.count) secret(s) using \(mechanism) mechanism...")
+        
+        if mechanism == "file" {
+            addSecretsToFile(secrets)
+        } else {
+            addSecretsToKeychain(secrets)
+        }
+    }
+    
+    static func deleteSecrets(_ variables: [String], mechanism: String) {
+        print("🗑️  Deleting \(variables.count) secret(s) using \(mechanism) mechanism...")
+        
+        if mechanism == "file" {
+            deleteSecretsFromFile(variables)
+        } else {
+            deleteSecretsFromKeychain(variables)
+        }
+    }
+    
+    static func addSecretsToFile(_ secrets: [String: String]) {
+        let secretsPath = Preferences.secretsFile.expandingTildeInPath
+        
+        // Read existing secrets
+        var existingContent = ""
+        if FileManager.default.fileExists(atPath: secretsPath) {
+            existingContent = (try? String(contentsOfFile: secretsPath)) ?? ""
+        }
+        
+        // Add new secrets
+        var newContent = existingContent
+        for (key, value) in secrets {
+            // Check if key already exists and update it
+            let pattern = "^\\s*\(NSRegularExpression.escapedPattern(for: key))\\s*="
+            let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines])
+            let range = NSRange(location: 0, length: newContent.count)
+            
+            if regex?.firstMatch(in: newContent, options: [], range: range) != nil {
+                // Update existing - replace the entire line
+                let lines = newContent.components(separatedBy: .newlines)
+                let updatedLines = lines.map { line in
+                    let lineRange = NSRange(location: 0, length: line.count)
+                    if regex?.firstMatch(in: line, options: [], range: lineRange) != nil {
+                        return "\(key)=\(value)"
+                    }
+                    return line
+                }
+                newContent = updatedLines.joined(separator: "\n")
+                print("✅ Updated secret: \(key)")
+            } else {
+                // Add new
+                if !newContent.hasSuffix("\n") && !newContent.isEmpty {
+                    newContent += "\n"
+                }
+                newContent += "\(key)=\(value)\n"
+                print("✅ Added secret: \(key)")
+            }
+        }
+        
+        // Write back to file
+        do {
+            try newContent.write(toFile: secretsPath, atomically: true, encoding: .utf8)
+            
+            // Set secure permissions
+            let attributes = [FileAttributeKey.posixPermissions: 0o600]
+            try FileManager.default.setAttributes(attributes, ofItemAtPath: secretsPath)
+            
+            print("✅ Secrets file updated: \(secretsPath)")
+        } catch {
+            print("❌ Failed to update secrets file: \(error.localizedDescription)")
+        }
+    }
+    
+    static func deleteSecretsFromFile(_ variables: [String]) {
+        let secretsPath = Preferences.secretsFile.expandingTildeInPath
+        
+        guard FileManager.default.fileExists(atPath: secretsPath) else {
+            print("❌ Secrets file not found: \(secretsPath)")
+            return
+        }
+        
+        do {
+            let content = try String(contentsOfFile: secretsPath)
+            var lines = content.components(separatedBy: .newlines)
+            
+            for variable in variables {
+                let pattern = "^\\s*\(NSRegularExpression.escapedPattern(for: variable))\\s*="
+                let regex = try NSRegularExpression(pattern: pattern, options: [])
+                
+                lines = lines.filter { line in
+                    let range = NSRange(location: 0, length: line.count)
+                    return regex.firstMatch(in: line, options: [], range: range) == nil
+                }
+                
+                print("✅ Deleted secret: \(variable)")
+            }
+            
+            let newContent = lines.joined(separator: "\n")
+            try newContent.write(toFile: secretsPath, atomically: true, encoding: .utf8)
+            
+            print("✅ Secrets file updated: \(secretsPath)")
+        } catch {
+            print("❌ Failed to delete secrets: \(error.localizedDescription)")
+        }
+    }
+    
+    static func addSecretsToKeychain(_ secrets: [String: String]) {
+        print("🔑 Keychain support not yet implemented")
+        // TODO: Implement keychain operations
+    }
+    
+    static func deleteSecretsFromKeychain(_ variables: [String]) {
+        print("🔑 Keychain support not yet implemented") 
+        // TODO: Implement keychain operations
+    }
+    
+    static func createTemplate() {
+        print("📄 Creating template from current Claude config...")
+        // TODO: Implement template creation
+    }
+    
+    static func resetSettings() {
+        print("🔄 Resetting ClaudeAutoConfig to default settings...")
+        // TODO: Implement settings reset
+    }
+    
+    static func getRunningDaemonPIDs() -> [String] {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        task.arguments = ["-f", "ClaudeAutoConfig"]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                return output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .components(separatedBy: .newlines)
+                    .filter { !$0.isEmpty }
+            }
+        } catch {
+            // Ignore errors - return empty array
+        }
+        
+        return []
+    }
+    
+    static func showStatus() {
+        print("📊 ClaudeAutoConfig Status")
+        print(String(repeating: "=", count: 40))
+        
+        // Check if daemon is running
+        let pids = getRunningDaemonPIDs()
+        if pids.count > 0 {
+            print("🟢 Daemon Status: RUNNING (PID: \(pids.joined(separator: ", ")))")
+        } else {
+            print("🔴 Daemon Status: NOT RUNNING")
+        }
+        
+        // Check LaunchAgent status
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        if FileManager.default.fileExists(atPath: launchAgentPath) {
+            print("🟢 LaunchAgent: INSTALLED")
+            
+            // Check if loaded
+            let launchctl = Process()
+            launchctl.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            launchctl.arguments = ["list", "com.oemden.claudeautoconfig"]
+            launchctl.standardOutput = Pipe()
+            launchctl.standardError = Pipe()
+            
+            do {
+                try launchctl.run()
+                launchctl.waitUntilExit()
+                if launchctl.terminationStatus == 0 {
+                    print("🟢 LaunchAgent: LOADED")
+                } else {
+                    print("🟡 LaunchAgent: NOT LOADED")
+                }
+            } catch {
+                print("❓ LaunchAgent: STATUS UNKNOWN")
+            }
+        } else {
+            print("🔴 LaunchAgent: NOT INSTALLED")
+        }
+        
+        // Check configuration
+        let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
+        if FileManager.default.fileExists(atPath: plistPath) {
+            print("🟢 Configuration: SETUP COMPLETE")
+            
+            let (isValid, errors) = Preferences.validateSetup()
+            if isValid {
+                print("🟢 Validation: ALL CHECKS PASSED")
+            } else {
+                print("🟡 Validation: \(errors.count) ISSUE(S) FOUND")
+                for error in errors.prefix(3) {
+                    print("   ❌ \(error)")
+                }
+                if errors.count > 3 {
+                    print("   ... and \(errors.count - 3) more")
+                }
+            }
+        } else {
+            print("🔴 Configuration: NOT SETUP")
+        }
+        
+        // Show current settings summary
+        print("\n📋 Quick Settings:")
+        print("   Voice Notifications: \(Preferences.voiceNotifications ? "ON" : "OFF")")
+        print("   macOS Notifications: \(Preferences.macosNotifications ? "ON" : "OFF")")
+        print("   Secrets File: \(Preferences.secretsFile)")
+        print("   Template File: \(Preferences.templateClaudeDesktopConfigFile)")
+    }
+    
+    static func showConfig() {
+        print("⚙️  ClaudeAutoConfig Configuration")
+        print(String(repeating: "=", count: 50))
+        
+        Preferences.printCurrentSettings()
+        
+        // Show secrets count (don't show actual values)
+        let secretsPath = Preferences.secretsFile.expandingTildeInPath
+        if FileManager.default.fileExists(atPath: secretsPath) {
+            do {
+                let secretsContent = try String(contentsOfFile: secretsPath)
+                let secretLines = secretsContent.components(separatedBy: .newlines)
+                    .filter { line in
+                        let trimmed = line.trimmingCharacters(in: .whitespaces)
+                        return !trimmed.isEmpty && !trimmed.hasPrefix("#") && trimmed.contains("=")
+                    }
+                print("\n🔐 Secrets: \(secretLines.count) configured")
+                
+                // Show secret keys (not values)
+                print("   Keys: ", terminator: "")
+                let keys = secretLines.compactMap { line -> String? in
+                    let parts = line.components(separatedBy: "=")
+                    return parts.first?.trimmingCharacters(in: .whitespaces)
+                }
+                print(keys.joined(separator: ", "))
+            } catch {
+                print("\n🔐 Secrets: Error reading file")
+            }
+        } else {
+            print("\n🔐 Secrets: No secrets file found")
+        }
+    }
+    
+    static func installLaunchAgent() {
+        print("📦 Installing ClaudeAutoConfig LaunchAgent...")
+        
+        // TODO: UNCOMMENT WHEN READY TO TEST WITH ADMIN
+        /*
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let bundlePlistPath = Bundle.main.path(forResource: "com.oemden.claudeautoconfig", ofType: "plist")
+        
+        guard let sourcePlistPath = bundlePlistPath else {
+            print("❌ Could not find com.oemden.claudeautoconfig.plist in bundle")
+            return
+        }
+        
+        do {
+            // Create LaunchAgents directory if it doesn't exist
+            let launchAgentsDir = "\(NSHomeDirectory())/Library/LaunchAgents"
+            try FileManager.default.createDirectory(atPath: launchAgentsDir, withIntermediateDirectories: true)
+            
+            // Create Logs directory
+            let logsDir = "\(NSHomeDirectory())/Library/Logs"
+            try FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true)
+            
+            // Copy plist file from bundle
+            try FileManager.default.copyItem(atPath: sourcePlistPath, toPath: launchAgentPath)
+            
+            print("✅ LaunchAgent plist installed: \(launchAgentPath)")
+            print("📋 Use --enable to start the daemon")
+            
+        } catch {
+            print("❌ Failed to install LaunchAgent: \(error.localizedDescription)")
+        }
+        */
+        
+        print("📝 This will create:")
+        print("   ~/Library/LaunchAgents/com.oemden.claudeautoconfig.plist")
+        print("   ~/Library/Logs/ClaudeAutoConfig.log")
+        print("🚧 Implementation commented out - requires admin testing")
+    }
+    
+    static func uninstallLaunchAgent() {
+        print("🗑️  Uninstalling ClaudeAutoConfig LaunchAgent...")
+        
+        // TODO: UNCOMMENT WHEN READY TO TEST WITH ADMIN
+        /*
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        
+        // First disable if loaded
+        disableLaunchAgent()
+        
+        do {
+            if FileManager.default.fileExists(atPath: launchAgentPath) {
+                try FileManager.default.removeItem(atPath: launchAgentPath)
+                print("✅ LaunchAgent plist removed")
+            } else {
+                print("ℹ️  LaunchAgent plist not found")
+            }
+        } catch {
+            print("❌ Failed to remove LaunchAgent: \(error.localizedDescription)")
+        }
+        */
+        
+        print("📝 This will:")
+        print("   1. Disable LaunchAgent (if enabled)")
+        print("   2. Remove ~/Library/LaunchAgents/com.oemden.claudeautoconfig.plist")
+        print("🚧 Implementation commented out - requires admin testing")
+    }
+    
+    static func enableLaunchAgent() {
+        print("🚀 Enabling ClaudeAutoConfig LaunchAgent...")
+        
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        
+        guard FileManager.default.fileExists(atPath: launchAgentPath) else {
+            print("❌ LaunchAgent not installed. Run --install first.")
+            return
+        }
+        
+        // First, modify plist to set RunAtLoad=true and KeepAlive=true
+        print("📝 Updating plist configuration...")
+        do {
+            let plistURL = URL(fileURLWithPath: launchAgentPath)
+            var plistDict = try PropertyListSerialization.propertyList(from: Data(contentsOf: plistURL), format: nil) as! [String: Any]
+            
+            plistDict["RunAtLoad"] = true
+            plistDict["KeepAlive"] = true
+            
+            let updatedData = try PropertyListSerialization.data(fromPropertyList: plistDict, format: .xml, options: 0)
+            try updatedData.write(to: plistURL)
+            print("✅ Plist updated: RunAtLoad=true, KeepAlive=true")
+        } catch {
+            print("❌ Failed to update plist: \(error.localizedDescription)")
+            return
+        }
+        
+        // Then load the LaunchAgent
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        task.arguments = ["load", "-w", launchAgentPath]
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                print("✅ LaunchAgent enabled and started")
+                print("🔄 Daemon will start automatically on login")
+            } else {
+                print("❌ Failed to enable LaunchAgent (exit code: \(task.terminationStatus))")
+            }
+        } catch {
+            print("❌ Failed to run launchctl: \(error.localizedDescription)")
+        }
+    }
+    
+    static func disableLaunchAgent() {
+        print("🛑 Disabling ClaudeAutoConfig LaunchAgent...")
+        
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        
+        guard FileManager.default.fileExists(atPath: launchAgentPath) else {
+            print("ℹ️  LaunchAgent not installed")
+            return
+        }
+        
+        // First, kill any running daemon processes
+        let pids = getRunningDaemonPIDs()
+        if !pids.isEmpty {
+            print("🔪 Killing running daemon processes: \(pids.joined(separator: ", "))")
+            for pid in pids {
+                let killTask = Process()
+                killTask.executableURL = URL(fileURLWithPath: "/bin/kill")
+                killTask.arguments = [pid]
+                try? killTask.run()
+                killTask.waitUntilExit()
+            }
+        }
+        
+        // Then unload the LaunchAgent
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        task.arguments = ["unload", "-w", launchAgentPath]
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                print("✅ LaunchAgent disabled and stopped")
+            } else {
+                print("❌ Failed to disable LaunchAgent (exit code: \(task.terminationStatus))")
+            }
+        } catch {
+            print("❌ Failed to run launchctl: \(error.localizedDescription)")
+            return
+        }
+        
+        // Finally, modify plist to set RunAtLoad=false and KeepAlive=false
+        print("📝 Updating plist configuration...")
+        do {
+            let plistURL = URL(fileURLWithPath: launchAgentPath)
+            var plistDict = try PropertyListSerialization.propertyList(from: Data(contentsOf: plistURL), format: nil) as! [String: Any]
+            
+            plistDict["RunAtLoad"] = false
+            plistDict["KeepAlive"] = false
+            
+            let updatedData = try PropertyListSerialization.data(fromPropertyList: plistDict, format: .xml, options: 0)
+            try updatedData.write(to: plistURL)
+            print("✅ Plist updated: RunAtLoad=false, KeepAlive=false")
+        } catch {
+            print("❌ Failed to update plist: \(error.localizedDescription)")
+        }
+    }
+    
+    static func restoreOriginalConfig() {
+        print("🔙 Restoring original Claude configuration...")
+        // TODO: Implement config restoration
+    }
+    
+    static func addSecretsInteractive(mechanism: String) {
+        print("🔐 Interactive secret addition (mechanism: \(mechanism))")
+        print("📝 Enter secrets one per line in format: KEY=VALUE")
+        print("📝 Press Enter on empty line to finish")
+        print("📝 Special characters will be preserved exactly as typed")
+        print("")
+        
+        var secrets: [String: String] = [:]
+        
+        while true {
+            print("Enter secret (KEY=VALUE): ", terminator: "")
+            
+            guard let input = readLine(), !input.isEmpty else {
+                break
+            }
+            
+            let parts = input.components(separatedBy: "=")
+            if parts.count >= 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespaces)
+                let value = parts.dropFirst().joined(separator: "=").trimmingCharacters(in: .whitespaces)
+                secrets[key] = value
+                print("✅ Added: \(key)")
+            } else {
+                print("❌ Invalid format. Use: KEY=VALUE")
+            }
+        }
+        
+        if !secrets.isEmpty {
+            addSecrets(secrets, mechanism: mechanism)
+        } else {
+            print("ℹ️  No secrets added")
+        }
+    }
+}
+
+// Check for CLI arguments
+let arguments = Array(CommandLine.arguments.dropFirst())
+if CLICommands.parseArguments(arguments) {
+    exit(0) // Exit after processing CLI commands
+}
+
 // Only validate critical startup requirements (don't block startup)
 let monitor = AppMonitor()
 

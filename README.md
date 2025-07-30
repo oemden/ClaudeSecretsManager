@@ -32,7 +32,7 @@ make test
 
 2. Edit the secrets file:
    ```bash
-   nano ~/dev/Claude\ Auto\ Config/secrets/claude_secrets
+   nano ~/.claudeautoconfig/claude_secrets
    ```
 
 ### Testing

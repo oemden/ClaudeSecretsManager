@@ -111,6 +111,282 @@ struct Preferences {
         return UserDefaults(suiteName: domain) ?? UserDefaults.standard
     }
     
+    // Define mandatory keys that MUST exist for proper configuration
+    static let mandatoryKeys = [
+        "target_claudedesktop_config_file",
+        "template_claudedesktop_config_file", 
+        "template_claudecode_config_file",
+        "first_run_claudedesktop_config_backup_file",
+        "first_run_claudecode_config_backup_file",
+        "secrets_mechanism",
+        "secrets_file",
+        "voice_notifications",
+        "macos_notifications",
+        "manage_ClaudeDesktop_config",
+        "manage_ClaudeCode_config",
+        "shareClaudeDesktop_config_withClaudeCode",
+        "always_secure_config",
+        "first_run_done"
+    ]
+    
+    // Default values for mandatory keys
+    static let mandatoryDefaults: [String: Any] = [
+        "target_claudedesktop_config_file": "~/Library/Application Support/Claude/claude_desktop_config_test.json",
+        "template_claudedesktop_config_file": "~/Library/Application Support/Claude/claude_desktop_config_template.json",
+        "template_claudecode_config_file": "~/Library/Application Support/Claude/claude_desktop_config_template.json",
+        "first_run_claudedesktop_config_backup_file": "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json",
+        "first_run_claudecode_config_backup_file": "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json",
+        "secrets_mechanism": "file",
+        "secrets_file": "~/.claudeautoconfig/.claude_secrets",
+        "voice_notifications": true,
+        "macos_notifications": true,
+        "manage_ClaudeDesktop_config": true,
+        "manage_ClaudeCode_config": true,
+        "shareClaudeDesktop_config_withClaudeCode": false,
+        "always_secure_config": true,
+        "first_run_done": true
+    ]
+    
+    // Check if preferences are properly configured using 3-step logic
+    static func isProperlyConfigured() -> Bool {
+        let plistPath = NSHomeDirectory() + "/Library/Preferences/\(domain).plist"
+        
+        // Step 1: detect file -> ls -> not present -> create new file with all defaults
+        if !FileManager.default.fileExists(atPath: plistPath) {
+            Logger.shared.info("🔧 Plist file not present - creating with all defaults")
+            return createCompleteConfiguration()
+        }
+        
+        // Step 2: detect file -> ls -> present -> defaults -> empty -> create new file with all defaults  
+        if isPlistEmpty() {
+            Logger.shared.info("🔧 Plist file empty - recreating with all defaults")
+            return createCompleteConfiguration()
+        }
+        
+        // Step 3: detect file -> ls -> present -> defaults -> not empty -> detect missing keys -> set with defaults
+        let missingKeys = getMissingMandatoryKeys()
+        if !missingKeys.isEmpty {
+            Logger.shared.info("🔧 Plist has missing keys: \(missingKeys) - setting defaults")
+            return setMissingKeysToDefaults(missingKeys)
+        }
+        
+        // All keys present, validate files exist
+        return validateAndCreateFiles()
+    }
+    
+    // Check if plist domain is empty (no keys)
+    static func isPlistEmpty() -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        process.arguments = ["read", domain]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus != 0 // Empty if can't read domain
+        } catch {
+            return true
+        }
+    }
+    
+    // Get list of missing mandatory keys
+    static func getMissingMandatoryKeys() -> [String] {
+        var missing: [String] = []
+        
+        for key in mandatoryKeys {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            process.arguments = ["read", domain, key]
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    missing.append(key)
+                }
+            } catch {
+                missing.append(key)
+            }
+        }
+        
+        return missing
+    }
+    
+    // Create complete configuration with all defaults
+    static func createCompleteConfiguration() -> Bool {
+        Logger.shared.info("🔧 Creating complete configuration with all mandatory keys...")
+        
+        for (key, value) in mandatoryDefaults {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            
+            // Handle different value types
+            if let boolValue = value as? Bool {
+                process.arguments = ["write", domain, key, "-bool", boolValue ? "true" : "false"]
+            } else if let stringValue = value as? String {
+                process.arguments = ["write", domain, key, stringValue]
+            } else {
+                process.arguments = ["write", domain, key, "\(value)"]
+            }
+            
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    Logger.shared.error("❌ Failed to set key: \(key)")
+                    return false
+                }
+            } catch {
+                Logger.shared.error("❌ Failed to set key \(key): \(error)")
+                return false
+            }
+        }
+        
+        Logger.shared.success("✅ Complete configuration created")
+        return validateAndCreateFiles()
+    }
+    
+    // Set missing keys to their default values
+    static func setMissingKeysToDefaults(_ missingKeys: [String]) -> Bool {
+        for key in missingKeys {
+            guard let defaultValue = mandatoryDefaults[key] else {
+                Logger.shared.error("❌ No default value for key: \(key)")
+                return false
+            }
+            
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            
+            // Handle different value types
+            if let boolValue = defaultValue as? Bool {
+                process.arguments = ["write", domain, key, "-bool", boolValue ? "true" : "false"]
+            } else if let stringValue = defaultValue as? String {
+                process.arguments = ["write", domain, key, stringValue]
+            } else {
+                process.arguments = ["write", domain, key, "\(defaultValue)"]
+            }
+            
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    Logger.shared.error("❌ Failed to set missing key: \(key)")
+                    return false
+                }
+                Logger.shared.success("✅ Set missing key: \(key)")
+            } catch {
+                Logger.shared.error("❌ Failed to set missing key \(key): \(error)")
+                return false
+            }
+        }
+        
+        return validateAndCreateFiles()
+    }
+    
+    // Validate and auto-create missing files (template, secrets)
+    static func validateAndCreateFiles() -> Bool {
+        let templatePath = templateClaudeDesktopConfigFile.expandingTildeInPath
+        let secretsPath = secretsFile.expandingTildeInPath
+        
+        // Check/create template file
+        if !FileManager.default.fileExists(atPath: templatePath) {
+            Logger.shared.info("🔧 Template file missing, creating: \(templatePath)")
+            if !createTemplateFile(at: templatePath) {
+                return false
+            }
+        }
+        
+        // Check/create secrets file  
+        if !FileManager.default.fileExists(atPath: secretsPath) {
+            Logger.shared.info("🔧 Secrets file missing, creating: \(secretsPath)")
+            if !createSecretsFile(at: secretsPath) {
+                return false
+            }
+        }
+        
+        return true
+    }
+    
+    // Create template file - copy from existing config.json or create default
+    static func createTemplateFile(at templatePath: String) -> Bool {
+        // Try to copy from existing claude_desktop_config.json first  
+        let existingConfigPath = "\(Config.claudeConfigDir)/claude_desktop_config.json".expandingTildeInPath
+        
+        if FileManager.default.fileExists(atPath: existingConfigPath) {
+            do {
+                try FileManager.default.copyItem(atPath: existingConfigPath, toPath: templatePath)
+                Logger.shared.success("✅ Template created from existing config: \(templatePath)")
+                return true
+            } catch {
+                Logger.shared.warning("⚠️  Failed to copy existing config: \(error)")
+            }
+        }
+        
+        // Create default template
+        let defaultTemplate = """
+{
+  "mcpServers": {
+    "example-server": {
+      "command": "echo",
+      "args": ["Hello from MCP server!"],
+      "env": {
+        "API_KEY": "{{API_KEY}}",
+        "SECRET_TOKEN": "{{SECRET_TOKEN}}"
+      }
+    }
+  }
+}
+"""
+        
+        do {
+            // Create directory if needed
+            let templateDir = URL(fileURLWithPath: templatePath).deletingLastPathComponent().path
+            try FileManager.default.createDirectory(atPath: templateDir, withIntermediateDirectories: true, attributes: nil)
+            
+            try defaultTemplate.write(toFile: templatePath, atomically: true, encoding: .utf8)
+            Logger.shared.success("✅ Default template created: \(templatePath)")
+            return true
+        } catch {
+            Logger.shared.error("❌ Failed to create template: \(error)")
+            return false
+        }
+    }
+    
+    // Create secrets file with placeholder values
+    static func createSecretsFile(at secretsPath: String) -> Bool {
+        let defaultSecrets = """
+# ClaudeAutoConfig Secrets File
+# Add your secrets here in KEY=VALUE format
+
+API_KEY=your_api_key_here
+SECRET_TOKEN=your_secret_token_here
+
+# You can also use export format:
+# export ANOTHER_KEY=another_value
+"""
+        
+        do {
+            // Create directory if needed  
+            let secretsDir = URL(fileURLWithPath: secretsPath).deletingLastPathComponent().path
+            try FileManager.default.createDirectory(atPath: secretsDir, withIntermediateDirectories: true, attributes: nil)
+            
+            try defaultSecrets.write(toFile: secretsPath, atomically: true, encoding: .utf8)
+            
+            // Set secure permissions (600 = read/write for owner only)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: secretsPath)
+            
+            Logger.shared.success("✅ Default secrets file created: \(secretsPath)")
+            return true
+        } catch {
+            Logger.shared.error("❌ Failed to create secrets file: \(error)")
+            return false
+        }
+    }
+    
     // Safety cleanup preference
     static var alwaysSecureConfig: Bool {
         // If never set, defaults to true for security
@@ -307,8 +583,8 @@ struct Preferences {
         // Try to show SwiftDialog GUI
         showSwiftDialogSetup(errors: errors)
         
-        // Voice notification - only if plist doesn't exist (not already created)
-        if voiceNotifications && !FileManager.default.fileExists(atPath: "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist") {
+        // Voice notification - only if preferences not configured (not already created)
+        if voiceNotifications && !Preferences.isProperlyConfigured() {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
             process.arguments = ["ClaudeAutoConfig setup required"]
@@ -615,12 +891,9 @@ class AppMonitor {
             if !configExists {
                 Logger.shared.info("🚀 No config exists for existing processes - checking if plist exists first")
                 
-                // Check if plist exists FIRST - before any settings checks
-                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
-                let plistExists = FileManager.default.fileExists(atPath: plistPath)
-                
-                if !plistExists {
-                    Logger.shared.error("❌ No plist exists - terminating existing Claude Code processes and showing setup")
+                // Check if preferences are properly configured FIRST - before any settings checks
+                if !Preferences.isProperlyConfigured() {
+                    Logger.shared.error("❌ No proper configuration exists - terminating existing Claude Code processes and showing setup")
                     
                     // Kill the existing processes
                     killSpecificProcesses(pids: Array(currentProcesses))
@@ -847,12 +1120,9 @@ class AppMonitor {
                 // No config exists - check if plist exists FIRST
                 Logger.shared.info("🚀 No config exists - checking if plist exists first")
                 
-                // Check if plist exists FIRST - before any settings checks
-                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
-                let plistExists = FileManager.default.fileExists(atPath: plistPath)
-                
-                if !plistExists {
-                    Logger.shared.error("❌ No plist exists - terminating new Claude Code processes and showing setup")
+                // Check if preferences are properly configured FIRST - before any settings checks
+                if !Preferences.isProperlyConfigured() {
+                    Logger.shared.error("❌ No proper configuration exists - terminating new Claude Code processes and showing setup")
                     
                     // Kill the specific processes that were detected
                     killSpecificProcesses(pids: Array(newProcesses))
@@ -1758,8 +2028,7 @@ struct CLICommands {
         }
         
         // Check configuration
-        let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
-        if FileManager.default.fileExists(atPath: plistPath) {
+        if Preferences.isProperlyConfigured() {
             print("🟢 Configuration: SETUP COMPLETE")
             
             let (isValid, errors) = Preferences.validateSetup()
@@ -2032,11 +2301,11 @@ struct CLICommands {
     }
 }
 
-// Check for CLI arguments
-let arguments = Array(CommandLine.arguments.dropFirst())
-if CLICommands.parseArguments(arguments) {
-    exit(0) // Exit after processing CLI commands
-}
+// COMMENTED OUT FOR PURE DAEMON MODE - CLI arguments
+// let arguments = Array(CommandLine.arguments.dropFirst())
+// if CLICommands.parseArguments(arguments) {
+//     exit(0) // Exit after processing CLI commands
+// }
 
 // Only validate critical startup requirements (don't block startup)
 let monitor = AppMonitor()

@@ -149,6 +149,15 @@ struct Preferences {
         return customDefaults.string(forKey: "claude_code_binary_path") ?? "/bin/sleep"
     }
     
+    // First-run setup
+    static var isFirstRun: Bool {
+        return !customDefaults.bool(forKey: "first_run_done")
+    }
+    
+    static var alwaysResetConfigAtLaunch: Bool {
+        return customDefaults.bool(forKey: "always_reset_config_at_launch")
+    }
+    
     // Helper methods
     static func setDefaults() {
         let defaults = [
@@ -177,7 +186,11 @@ struct Preferences {
             // App and binary configuration
             "claude_desktop_bundle_id": "com.apple.TextEdit", // Test: TextEdit, Prod: com.anthropic.claude-desktop
             "claude_code_process_name": "sleep", // Test: sleep, Prod: claude
-            "claude_code_binary_path": "/bin/sleep" // Test: /bin/sleep, Prod: /Users/oem/.local/bin/claude
+            "claude_code_binary_path": "/bin/sleep", // Test: /bin/sleep, Prod: /Users/oem/.local/bin/claude
+            
+            // First-run setup
+            "first_run_done": false,
+            "always_reset_config_at_launch": false
         ] as [String : Any]
         
         customDefaults.register(defaults: defaults)
@@ -201,6 +214,277 @@ struct Preferences {
         print("   Always Secure Config: \(alwaysSecureConfig)")
         print("   Share Config: \(shareClaudeDesktopConfigWithClaudeCode)")
         print("   Monitor Interval: \(processMonitoringInterval)s")
+        print("   First Run: \(isFirstRun)")
+        print("   Reset at Launch: \(alwaysResetConfigAtLaunch)")
+    }
+    
+    // MARK: - Setup Validation
+    static func validateSetup() -> (isValid: Bool, errors: [String]) {
+        var errors: [String] = []
+        
+        // Always check critical setup requirements (don't rely on isFirstRun)
+        
+        // Check if first_run_done is explicitly set to true
+        if isFirstRun {
+            errors.append("Setup not completed. Please run initial setup.")
+        }
+        
+        // Check critical files exist
+        let templatePath = templateClaudeDesktopConfigFile.expandingTildeInPath
+        if !FileManager.default.fileExists(atPath: templatePath) {
+            errors.append("Template file missing: \(templatePath)")
+        }
+        
+        let secretsPath = secretsFile.expandingTildeInPath
+        if !FileManager.default.fileExists(atPath: secretsPath) {
+            errors.append("Secrets file missing: \(secretsPath)")
+        }
+        
+        // Check target directory is writable
+        let targetPath = targetClaudeDesktopConfigFile.expandingTildeInPath
+        let targetDir = (targetPath as NSString).deletingLastPathComponent
+        if !FileManager.default.isWritableFile(atPath: targetDir) {
+            errors.append("Target directory not writable: \(targetDir)")
+        }
+        
+        return (errors.isEmpty, errors)
+    }
+    
+    static func createFirstRunBackups() -> Bool {
+        if isFirstRun {
+            Logger.shared.info("ℹ️  Creating first-run backups...")
+            
+            // Backup Claude Desktop config if it exists
+            let originalConfig = "~/Library/Application Support/Claude/claude_desktop_config.json".expandingTildeInPath
+            let backupPath = firstRunClaudeDesktopBackupFile.expandingTildeInPath
+            
+            if FileManager.default.fileExists(atPath: originalConfig) && !FileManager.default.fileExists(atPath: backupPath) {
+                do {
+                    try FileManager.default.copyItem(atPath: originalConfig, toPath: backupPath)
+                    Logger.shared.success("✅ Created first-run backup: \(backupPath)")
+                } catch {
+                    Logger.shared.error("❌ Failed to create backup: \(error.localizedDescription)")
+                    return false
+                }
+            }
+        }
+        return true // Backup creation successful or not needed
+    }
+    
+    static func markSetupCompleted() {
+        customDefaults.set(true, forKey: "first_run_done")
+        Logger.shared.success("✅ First-run setup completed")
+    }
+    
+    static func killRunningAppsForSetup() {
+        Logger.shared.warning("⚠️  Setup incomplete - terminating monitored applications")
+        
+        // Kill TextEdit (Claude Desktop test app)
+        let killTextEdit = Process()
+        killTextEdit.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        killTextEdit.arguments = ["-f", "TextEdit"]
+        try? killTextEdit.run()
+        
+        // Kill sleep processes (Claude Code test)
+        let killSleep = Process()
+        killSleep.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        killSleep.arguments = ["-f", "sleep"]
+        try? killSleep.run()
+        
+        Logger.shared.info("🛑 Terminated running applications")
+    }
+    
+    static func showSetupInstructions(errors: [String]) {
+        // First show console output for debugging
+        print("\n" + String(repeating: "=", count: 60))
+        print("🚨 CLAUDEAUTOCONFIG SETUP REQUIRED")
+        print(String(repeating: "=", count: 60))
+        print("\nConfiguration errors found:")
+        for error in errors {
+            print("❌ \(error)")
+        }
+        
+        // Try to show SwiftDialog GUI
+        showSwiftDialogSetup(errors: errors)
+        
+        // Voice notification - only if plist doesn't exist (not already created)
+        if voiceNotifications && !FileManager.default.fileExists(atPath: "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist") {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+            process.arguments = ["ClaudeAutoConfig setup required"]
+            try? process.run()
+        }
+    }
+    
+    static func showSwiftDialogSetup(errors: [String]) {
+        // Check if SwiftDialog is available
+        let dialogPath = "/usr/local/bin/dialog"
+        guard FileManager.default.fileExists(atPath: dialogPath) else {
+            Logger.shared.warning("⚠️  SwiftDialog not found at \(dialogPath) - showing console instructions only")
+            showConsoleInstructions(errors: errors)
+            return
+        }
+        
+        // Create SwiftDialog command
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: dialogPath)
+        
+        let dialogArgs = [
+            "--title", "ClaudeAutoConfig Setup Required",
+            "--message", "Configuration errors found:\n\n" + errors.map { "• \($0)" }.joined(separator: "\n"),
+            "--button1text", "Setup with Defaults",
+            "--button2text", "Show Manual Instructions",
+            "--icon", "SF=gear.circle.fill",
+            "--iconsize", "64",
+            "--width", "600",
+            "--height", "400",
+            "--ontop",
+            "--moveable"
+        ]
+        
+        task.arguments = dialogArgs
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            let exitCode = task.terminationStatus
+            Logger.shared.info("🔍 SwiftDialog exit code: \(exitCode)")
+            
+            if exitCode == 0 {
+                // Button 1 clicked - Setup with defaults
+                Logger.shared.info("✅ User chose to setup with defaults")
+                setupWithDefaults()
+            } else if exitCode == 2 {
+                // Button 2 clicked - Show manual instructions
+                Logger.shared.info("📋 User chose to see manual instructions")
+                showConsoleInstructions(errors: errors)
+            } else {
+                // Dialog cancelled or error
+                Logger.shared.info("❌ Dialog cancelled or error occurred")
+                showConsoleInstructions(errors: errors)
+            }
+        } catch {
+            Logger.shared.error("❌ Failed to show SwiftDialog: \(error.localizedDescription)")
+            showConsoleInstructions(errors: errors)
+        }
+    }
+    
+    static func setupWithDefaults() {
+        Logger.shared.info("🔧 Setting up ClaudeAutoConfig with default preferences...")
+        
+        // Call the firstrun_setup script
+        let scriptPath = "/Users/oem/dev/Claude Auto Config/firstrun_setup"
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: scriptPath)
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                Logger.shared.success("✅ firstrun_setup script completed successfully!")
+                // Force UserDefaults to synchronize with disk
+                customDefaults.synchronize()
+                // Show settings confirmation dialog
+                showSettingsDialog()
+            } else {
+                Logger.shared.error("❌ firstrun_setup script failed with exit code: \(task.terminationStatus)")
+            }
+        } catch {
+            Logger.shared.error("❌ Failed to run firstrun_setup script: \(error.localizedDescription)")
+        }
+    }
+    
+    static func showSettingsDialog() {
+        Logger.shared.info("📋 Showing current settings dialog...")
+        
+        // Get current settings with better formatting
+        let settings = [
+            "• Target Claude Desktop Config:\\n    \(targetClaudeDesktopConfigFile)",
+            "• Template File:\\n    \(templateClaudeDesktopConfigFile)", 
+            "• Secrets File:\\n    \(secretsFile)",
+            "• Voice Notifications:\\n    \(voiceNotifications ? "Enabled" : "Disabled")",
+            "• macOS Notifications:\\n    \(macosNotifications ? "Enabled" : "Disabled")",
+            "• Manage Claude Desktop:\\n    \(manageClaudeDesktopConfig ? "Yes" : "No")",
+            "• Manage Claude Code:\\n    \(manageClaudeCodeConfig ? "Yes" : "No")",
+            "• Always Secure Config:\\n    \(alwaysSecureConfig ? "Yes" : "No")",
+            "• Share Config between Apps:\\n    \(shareClaudeDesktopConfigWithClaudeCode ? "Yes" : "No")",
+            "• First Run Done:\\n    \(isFirstRun ? "No" : "Yes")"
+        ]
+        
+        let message = "ClaudeAutoConfig Settings Created Successfully!\\n\\n" + settings.joined(separator: "\\n\\n")
+        
+        let dialogPath = "/usr/local/bin/dialog"
+        guard FileManager.default.fileExists(atPath: dialogPath) else {
+            Logger.shared.warning("⚠️  SwiftDialog not found - showing settings in console")
+            Logger.shared.info("📋 Current ClaudeAutoConfig Settings:")
+            for setting in settings {
+                Logger.shared.info("   ✅ \(setting)")
+            }
+            return
+        }
+        
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: dialogPath)
+        
+        let dialogArgs = [
+            "--title", "ClaudeAutoConfig Settings",
+            "--message", message,
+            "--button1text", "OK", 
+            "--icon", "SF=checkmark.circle.fill",
+            "--iconsize", "64",
+            "--width", "700",
+            "--height", "500",
+            "--messagefont", "size=11",
+            "--ontop",
+            "--moveable"
+        ]
+        
+        task.arguments = dialogArgs
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            Logger.shared.info("📋 Settings dialog displayed via SwiftDialog")
+        } catch {
+            Logger.shared.error("❌ Failed to show SwiftDialog settings dialog: \(error.localizedDescription)")
+            Logger.shared.info("📋 Current settings:")
+            for setting in settings {
+                Logger.shared.info("   \(setting)")
+            }
+        }
+    }
+    
+    static func showConsoleInstructions(errors: [String]) {
+        print("\n📋 TO SETUP WITH DEFAULT PREFERENCES, RUN:")
+        print("""
+        # File paths
+        defaults write com.oemden.claudeautoconfig target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_test.json"
+        defaults write com.oemden.claudeautoconfig template_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
+        defaults write com.oemden.claudeautoconfig first_run_claudedesktop_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
+        
+        defaults write com.oemden.claudeautoconfig secrets_file "~/.claudeautoconfig/.claude_secrets"
+        
+        # Notifications
+        defaults write com.oemden.claudeautoconfig voice_notifications -bool true
+        defaults write com.oemden.claudeautoconfig macos_notifications -bool true
+        
+        # App management
+        defaults write com.oemden.claudeautoconfig manage_ClaudeDesktop_config -bool true
+        defaults write com.oemden.claudeautoconfig manage_ClaudeCode_config -bool true
+        defaults write com.oemden.claudeautoconfig shareClaudeDesktop_config_withClaudeCode -bool true
+        
+        # Mark setup complete
+        defaults write com.oemden.claudeautoconfig first_run_done -bool true
+        """)
+        
+        print("\n📁 THEN CREATE REQUIRED FILES:")
+        print("• Template: ~/Library/Application Support/Claude/claude_desktop_config_template.json")
+        print("• Secrets: ~/.claudeautoconfig/.claude_secrets")
+        
+        print("\n🔄 After setup, restart ClaudeAutoConfig")
+        print(String(repeating: "=", count: 60) + "\n")
     }
 }
 
@@ -266,6 +550,7 @@ class AppMonitor {
         
         setupNotifications()
         checkIfAlreadyRunning()
+        checkForExistingProcesses()
         startProcessMonitoring()
     }
     
@@ -311,6 +596,73 @@ class AppMonitor {
         }
     }
     
+    private func checkForExistingProcesses() {
+        Logger.shared.info("🔍 Checking for existing Claude Code processes on startup...")
+        Logger.shared.info("🔍 DEBUG: Process name to look for: '\(Config.claudeCodeProcessName)'")
+        Logger.shared.info("🔍 DEBUG: Binary path to look for: '\(Config.claudeCodeBinaryPath)'")
+        
+        // Get current running processes
+        let currentProcesses = getCurrentClaudeCodeProcesses()
+        Logger.shared.info("🔍 DEBUG: Found processes: \(currentProcesses)")
+        
+        if !currentProcesses.isEmpty {
+            Logger.shared.info("🔍 Found existing Claude Code processes: \(currentProcesses)")
+            
+            // Check if config file exists
+            let outputPath = Preferences.targetClaudeDesktopConfigFile.expandingTildeInPath
+            let configExists = FileManager.default.fileExists(atPath: outputPath)
+            
+            if !configExists {
+                Logger.shared.info("🚀 No config exists for existing processes - checking if plist exists first")
+                
+                // Check if plist exists FIRST - before any settings checks
+                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
+                let plistExists = FileManager.default.fileExists(atPath: plistPath)
+                
+                if !plistExists {
+                    Logger.shared.error("❌ No plist exists - terminating existing Claude Code processes and showing setup")
+                    
+                    // Kill the existing processes
+                    killSpecificProcesses(pids: Array(currentProcesses))
+                    
+                    // Show setup instructions (plist doesn't exist, so setup is definitely required)
+                    Preferences.showSetupInstructions(errors: ["Configuration file (plist) does not exist"])
+                    return
+                }
+                
+                // Plist exists, now validate setup normally
+                let (isValid, errors) = Preferences.validateSetup()
+                if !isValid {
+                    Logger.shared.error("❌ Setup incomplete - terminating existing Claude Code processes")
+                    
+                    // Kill the existing processes
+                    killSpecificProcesses(pids: Array(currentProcesses))
+                    
+                    // Show setup instructions
+                    Preferences.showSetupInstructions(errors: errors)
+                    return
+                }
+                
+                // Setup is valid, check management settings
+                let appType = "ClaudeCode"
+                let (managementEnabled, templatePath, outputPath) = getAppSettings(for: appType)
+                
+                if managementEnabled {
+                    createConfigForProcess(appType: appType, templatePath: templatePath, outputPath: outputPath)
+                } else {
+                    Logger.shared.info("ℹ️  Claude Code management disabled - not creating config")
+                }
+            } else {
+                Logger.shared.info("ℹ️  Config already exists for existing processes")
+            }
+        } else {
+            Logger.shared.info("ℹ️  No existing Claude Code processes found")
+        }
+        
+        // Update lastSeenProcesses to current state
+        lastSeenProcesses = currentProcesses
+    }
+    
     private func showNotification(title: String, body: String) {
         // Always print to console
         Logger.shared.info("📢 NOTIFICATION: \(title) - \(body)")
@@ -337,6 +689,33 @@ class AppMonitor {
         }
         
         Logger.shared.info("✅ Claude Desktop (\(app.localizedName ?? "App")) LAUNCHED")
+        
+        // Check if setup is valid before processing
+        let (isValid, errors) = Preferences.validateSetup()
+        if !isValid {
+            Logger.shared.error("❌ Setup incomplete - terminating Claude Desktop")
+            
+            // Force kill the app that just launched
+            app.forceTerminate()
+            
+            // Also use pkill as backup to ensure termination
+            let killTask = Process()
+            killTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            killTask.arguments = ["-f", "TextEdit"]
+            try? killTask.run()
+            
+            // Show setup instructions
+            Preferences.showSetupInstructions(errors: errors)
+            return
+        }
+        
+        // Create first-run backups if needed
+        if !Preferences.createFirstRunBackups() {
+            Logger.shared.error("❌ Failed to create first-run backups")
+            app.terminate()
+            return
+        }
+        
         Logger.shared.info("🔍 DEBUG: appDidLaunch triggered - calling runScript(phase: \"launch\")")
         
         // Run pre-launch script
@@ -465,49 +844,40 @@ class AppMonitor {
             let configExists = FileManager.default.fileExists(atPath: outputPath)
             
             if !configExists {
-                // No config exists - create it for the new process
-                Logger.shared.info("🚀 No config exists - creating for new Claude Code process")
+                // No config exists - check if plist exists FIRST
+                Logger.shared.info("🚀 No config exists - checking if plist exists first")
                 
-                // Refresh UserDefaults to pick up any external changes
-                UserDefaults.standard.synchronize()
+                // Check if plist exists FIRST - before any settings checks
+                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
+                let plistExists = FileManager.default.fileExists(atPath: plistPath)
                 
-                // Comprehensive UserDefaults debugging
-                Logger.shared.info("🔍 UserDefaults debugging:")
-                Logger.shared.info("   - Domain: \(Preferences.domain)")
-                
-                // Check if we should use our custom domain
-                let customDefaults = UserDefaults(suiteName: Preferences.domain)
-                let systemValue = UserDefaults.standard.bool(forKey: "manage_ClaudeCode_config")
-                let systemObject = UserDefaults.standard.object(forKey: "manage_ClaudeCode_config")
-                let customValue = customDefaults?.bool(forKey: "manage_ClaudeCode_config") ?? false
-                let customObject = customDefaults?.object(forKey: "manage_ClaudeCode_config")
-                
-                Logger.shared.info("   - System UserDefaults: value=\(systemValue), object exists=\(systemObject != nil)")
-                Logger.shared.info("   - Custom domain UserDefaults: value=\(customValue), object exists=\(customObject != nil)")
-                
-                // Try reading directly from defaults command
-                let task = Process()
-                task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
-                task.arguments = ["read", Preferences.domain, "manage_ClaudeCode_config"]
-                let pipe = Pipe()
-                task.standardOutput = pipe
-                task.standardError = Pipe()
-                
-                do {
-                    try task.run()
-                    task.waitUntilExit()
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    Logger.shared.info("   - defaults read output: '\(output ?? "nil")'")
-                } catch {
-                    Logger.shared.info("   - defaults read failed: \(error)")
+                if !plistExists {
+                    Logger.shared.error("❌ No plist exists - terminating new Claude Code processes and showing setup")
+                    
+                    // Kill the specific processes that were detected
+                    killSpecificProcesses(pids: Array(newProcesses))
+                    
+                    // Show setup instructions (plist doesn't exist, so setup is definitely required)
+                    Preferences.showSetupInstructions(errors: ["Configuration file (plist) does not exist"])
+                    return
                 }
                 
-                // Create config for the new process
+                // Plist exists, now validate setup normally
+                let (isValid, errors) = Preferences.validateSetup()
+                if !isValid {
+                    Logger.shared.error("❌ Setup incomplete - terminating Claude Code processes")
+                    
+                    // Kill the specific processes that were detected
+                    killSpecificProcesses(pids: Array(newProcesses))
+                    
+                    // Show setup instructions
+                    Preferences.showSetupInstructions(errors: errors)
+                    return
+                }
+                
+                // Setup is valid, check management settings
                 let appType = "ClaudeCode" // Since this is a process launch, treat as Claude Code
                 let (managementEnabled, templatePath, outputPath) = getAppSettings(for: appType)
-                
-                Logger.shared.info("🔍 Final result: managementEnabled = \(managementEnabled)")
                 
                 if managementEnabled {
                     createConfigForProcess(appType: appType, templatePath: templatePath, outputPath: outputPath)
@@ -540,16 +910,21 @@ class AppMonitor {
             let binaryPath = Config.claudeCodeBinaryPath
             let processName = Config.claudeCodeProcessName
             
+            Logger.shared.info("🔍 DEBUG: getCurrentClaudeCodeProcesses - processName: '\(processName)', binaryPath: '\(binaryPath)'")
+            
             // Use same logic as isClaudeCodeRunning
             if processName == "sleep" {
                 // Testing mode - detect sleep command regardless of path
                 task.arguments = [processName]
+                Logger.shared.info("🔍 DEBUG: Using sleep mode - pgrep arguments: \(task.arguments!)")
             } else if !binaryPath.isEmpty {
                 // Production mode - use specific binary path for precise detection
                 task.arguments = ["-f", binaryPath]
+                Logger.shared.info("🔍 DEBUG: Using binary path mode - pgrep arguments: \(task.arguments!)")
             } else {
                 // Fallback - pattern match for process name
                 task.arguments = ["-f", processName]
+                Logger.shared.info("🔍 DEBUG: Using fallback mode - pgrep arguments: \(task.arguments!)")
             }
             
             let pipe = Pipe()
@@ -559,13 +934,19 @@ class AppMonitor {
             try task.run()
             task.waitUntilExit()
             
+            Logger.shared.info("🔍 DEBUG: pgrep exit status: \(task.terminationStatus)")
+            
             if task.terminationStatus == 0 {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 let output = String(data: data, encoding: .utf8) ?? ""
+                Logger.shared.info("🔍 DEBUG: pgrep raw output: '\(output)'")
                 let pids = output.trimmingCharacters(in: .whitespacesAndNewlines)
                     .components(separatedBy: .newlines)
                     .filter { !$0.isEmpty }
+                Logger.shared.info("🔍 DEBUG: pgrep parsed PIDs: \(pids)")
                 return Set(pids)
+            } else {
+                Logger.shared.info("🔍 DEBUG: pgrep failed - no processes found")
             }
         } catch {
             Logger.shared.error("❌ Failed to get current processes: \(error.localizedDescription)")
@@ -627,6 +1008,29 @@ class AppMonitor {
             }
         } catch {
             Logger.shared.error("❌ Failed to clean orphaned config: \(error.localizedDescription)")
+        }
+    }
+    
+    private func killSpecificProcesses(pids: [String]) {
+        Logger.shared.warning("⚠️  Terminating specific processes: \(pids.joined(separator: ", "))")
+        
+        for pid in pids {
+            let killTask = Process()
+            killTask.executableURL = URL(fileURLWithPath: "/bin/kill")
+            killTask.arguments = ["-TERM", pid]
+            
+            do {
+                try killTask.run()
+                killTask.waitUntilExit()
+                
+                if killTask.terminationStatus == 0 {
+                    Logger.shared.success("✅ Terminated process \(pid)")
+                } else {
+                    Logger.shared.warning("⚠️  Process \(pid) may have already terminated")
+                }
+            } catch {
+                Logger.shared.error("❌ Failed to terminate process \(pid): \(error.localizedDescription)")
+            }
         }
     }
     
@@ -907,6 +1311,7 @@ do {
     // Continue if check fails
 }
 
+// Only validate critical startup requirements (don't block startup)
 let monitor = AppMonitor()
 
 // Keep the RunLoop alive

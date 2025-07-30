@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# ClaudeAutoConfig First-Run Setup Script
+# This script creates all the required preferences for ClaudeAutoConfig
+
+echo "🔧 Setting up ClaudeAutoConfig with default preferences..."
+
+# File paths - Claude Desktop
+defaults write com.oemden.claudeautoconfig target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_test.json"
+defaults write com.oemden.claudeautoconfig template_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
+defaults write com.oemden.claudeautoconfig first_run_claudedesktop_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
+
+# Claude Code (commented out for now)
+# defaults write com.oemden.claudeautoconfig target_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config_test.json"
+# defaults write com.oemden.claudeautoconfig template_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
+# defaults write com.oemden.claudeautoconfig first_run_claudecode_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
+
+# Secrets file
+defaults write com.oemden.claudeautoconfig secrets_file "~/.claudeautoconfig/.claude_secrets"
+
+# Notifications
+defaults write com.oemden.claudeautoconfig voice_notifications -bool true
+defaults write com.oemden.claudeautoconfig macos_notifications -bool true
+
+# Secrets mechanism
+defaults write com.oemden.claudeautoconfig secrets_mechanism "file"
+
+# First run 
+defaults write com.oemden.claudeautoconfig first_run_done -bool true
+
+# App managed
+defaults write com.oemden.claudeautoconfig manage_ClaudeDesktop_config -bool true
+defaults write com.oemden.claudeautoconfig manage_ClaudeCode_config -bool true
+defaults write com.oemden.claudeautoconfig always_secure_config -bool true
+defaults write com.oemden.claudeautoconfig always_reset_config_at_launch -bool false
+defaults write com.oemden.claudeautoconfig shareClaudeDesktop_config_withClaudeCode -bool true
+
+echo "✅ Default preferences set successfully!"
+
+# Create required files
+echo "📁 Creating required files..."
+
+# Create directories if they don't exist
+mkdir -p "$HOME/Library/Application Support/Claude"
+mkdir -p "$HOME/.claudeautoconfig"
+
+# Create template file
+TEMPLATE_FILE="$HOME/Library/Application Support/Claude/claude_desktop_config_template.json"
+cat > "$TEMPLATE_FILE" << 'EOF'
+{
+  "mcpServers": {
+    "example-server": {
+      "command": "echo",
+      "args": ["Hello from MCP server!"],
+      "env": {
+        "API_KEY": "{{API_KEY}}",
+        "SECRET_TOKEN": "{{SECRET_TOKEN}}"
+      }
+    }
+  }
+}
+EOF
+echo "✅ Created template file: $TEMPLATE_FILE"
+
+# Create secrets file
+SECRETS_FILE="$HOME/.claudeautoconfig/.claude_secrets"
+cat > "$SECRETS_FILE" << 'EOF'
+# ClaudeAutoConfig Secrets File
+# Add your secrets here in KEY=VALUE format
+
+API_KEY=your_api_key_here
+SECRET_TOKEN=your_secret_token_here
+
+# You can also use export format:
+# export ANOTHER_KEY=another_value
+EOF
+
+# Set secure permissions (600 = read/write for owner only)
+chmod 600 "$SECRETS_FILE"
+echo "✅ Created secrets file: $SECRETS_FILE"
+
+echo "✅ All required files created successfully!"
+echo "🔄 You can now launch TextEdit or sleep processes - they should work properly"
+
+# Voice notification for successful setup (after plist is created)
+echo "🔊 Voice notification: Claude auto config settings created"
+if command -v say >/dev/null 2>&1; then
+    say "Claude auto config settings created" &
+fi

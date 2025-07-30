@@ -891,7 +891,7 @@ class AppMonitor {
             if !configExists {
                 Logger.shared.info("🚀 No config exists for existing processes - checking if plist exists first")
                 
-                // Check if preferences are properly configured FIRST - before any settings checks
+                // Check if preferences are properly configured FIRST - auto-healing for sleep
                 if !Preferences.isProperlyConfigured() {
                     Logger.shared.error("❌ No proper configuration exists - terminating existing Claude Code processes and showing setup")
                     
@@ -963,7 +963,26 @@ class AppMonitor {
         
         Logger.shared.info("✅ Claude Desktop (\(app.localizedName ?? "App")) LAUNCHED")
         
-        // Check if setup is valid before processing
+        // Check if plist exists FIRST - before any validation that might auto-heal
+        let plistPath = NSHomeDirectory() + "/Library/Preferences/\(Preferences.domain).plist"
+        if !FileManager.default.fileExists(atPath: plistPath) {
+            Logger.shared.error("❌ Configuration plist missing - terminating Claude Desktop and showing setup")
+            
+            // Force kill the app that just launched
+            app.forceTerminate()
+            
+            // Also use pkill as backup to ensure termination
+            let killTask = Process()
+            killTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            killTask.arguments = ["-f", "TextEdit"]
+            try? killTask.run()
+            
+            // Show setup instructions
+            Preferences.showSetupInstructions(errors: ["Configuration file (plist) does not exist"])
+            return
+        }
+        
+        // Plist exists, now check if setup is valid
         let (isValid, errors) = Preferences.validateSetup()
         if !isValid {
             Logger.shared.error("❌ Setup incomplete - terminating Claude Desktop")
@@ -1120,7 +1139,7 @@ class AppMonitor {
                 // No config exists - check if plist exists FIRST
                 Logger.shared.info("🚀 No config exists - checking if plist exists first")
                 
-                // Check if preferences are properly configured FIRST - before any settings checks
+                // Check if preferences are properly configured FIRST - auto-healing for sleep
                 if !Preferences.isProperlyConfigured() {
                     Logger.shared.error("❌ No proper configuration exists - terminating new Claude Code processes and showing setup")
                     

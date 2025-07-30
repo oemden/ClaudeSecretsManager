@@ -891,9 +891,12 @@ class AppMonitor {
             if !configExists {
                 Logger.shared.info("🚀 No config exists for existing processes - checking if plist exists first")
                 
-                // Check if preferences are properly configured FIRST - auto-healing for sleep
-                if !Preferences.isProperlyConfigured() {
-                    Logger.shared.error("❌ No proper configuration exists - terminating existing Claude Code processes and showing setup")
+                // Check if plist exists FIRST - before any settings checks (working de5c13c logic)
+                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
+                let plistExists = FileManager.default.fileExists(atPath: plistPath)
+                
+                if !plistExists {
+                    Logger.shared.error("❌ No plist exists - terminating existing Claude Code processes and showing setup")
                     
                     // Kill the existing processes
                     killSpecificProcesses(pids: Array(currentProcesses))
@@ -1139,9 +1142,12 @@ class AppMonitor {
                 // No config exists - check if plist exists FIRST
                 Logger.shared.info("🚀 No config exists - checking if plist exists first")
                 
-                // Check if preferences are properly configured FIRST - auto-healing for sleep
-                if !Preferences.isProperlyConfigured() {
-                    Logger.shared.error("❌ No proper configuration exists - terminating new Claude Code processes and showing setup")
+                // Check if plist exists FIRST - before any settings checks (working de5c13c logic)
+                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
+                let plistExists = FileManager.default.fileExists(atPath: plistPath)
+                
+                if !plistExists {
+                    Logger.shared.error("❌ No plist exists - terminating new Claude Code processes and showing setup")
                     
                     // Kill the specific processes that were detected
                     killSpecificProcesses(pids: Array(newProcesses))

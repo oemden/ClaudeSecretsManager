@@ -4,28 +4,32 @@
 import PackageDescription
 
 let package = Package(
-    name: "ClaudeAutoConfig",
+    name: "ClaudeSecretsManager",
     platforms: [
         .macOS(.v12)
     ],
     products: [
         .executable(
-            name: "ClaudeAutoConfig",
-            targets: ["ClaudeAutoConfig"]
+            name: "claudesecrets",
+            targets: ["ClaudeSecrets"]
         ),
         .executable(
-            name: "ClaudeAutoConfigCLI",
-            targets: ["ClaudeAutoConfigCLI"]
+            name: "claudesecrets-cli",
+            targets: ["ClaudeSecretsCLI"]
         )
     ],
     targets: [
-        .executableTarget(
-            name: "ClaudeAutoConfig",
+        .target(
+            name: "SharedConstants",
             dependencies: []
         ),
         .executableTarget(
-            name: "ClaudeAutoConfigCLI",
-            dependencies: []
+            name: "ClaudeSecrets",
+            dependencies: ["SharedConstants"]
+        ),
+        .executableTarget(
+            name: "ClaudeSecretsCLI",
+            dependencies: ["SharedConstants"]
         )
     ]
 )

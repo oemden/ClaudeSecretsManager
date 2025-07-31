@@ -10,7 +10,7 @@
 - **File Permissions**: Sets 600 on output files
 - **Voice Feedback**: "Configuration injected" on launch, "Configuration cleaned" on quit
 - **Debug Output**: Clear console logging of all operations
-- **CLI Management**: Dedicated ClaudeAutoConfigCLI executable for all management tasks
+- **CLI Management**: Dedicated Claude Secrets ManagerCLI executable for all management tasks
 - **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
 - **LaunchAgent**: Complete dev/prod installation with test_install.sh
 
@@ -36,7 +36,7 @@
 
 ### Major Achievements
 1. ✅ **Dynamic Configuration System**: Change 2 lines to switch between dev/semi-prod/prod
-2. ✅ **Dedicated CLI Executable**: ClaudeAutoConfigCLI handles all management tasks
+2. ✅ **Dedicated CLI Executable**: Claude Secrets ManagerCLI handles all management tasks
 3. ✅ **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
 4. ✅ **Security Overhaul**: On-demand secrets loading, eliminated memory caching
 5. ✅ **Fixed Process Detection**: Claude executable detection and false termination
@@ -93,7 +93,7 @@ for key in requiredKeys {
 - [x] Preferences system
 - [x] LaunchAgent setup (complete dev/prod)
 - [x] Production deployment (ready)
-- [x] CLI executable (dedicated ClaudeAutoConfigCLI)
+- [x] CLI executable (dedicated Claude Secrets ManagerCLI)
 - [x] Dynamic detection (bundle IDs, executable paths)
 - [x] Security fixes (on-demand secrets loading)
 - [x] Process detection fixes (claude executable)
@@ -108,21 +108,21 @@ swift build -c release
 ./test_install.sh dev    # or prod
 
 # CLI Management
-ClaudeAutoConfigCLI --help
-ClaudeAutoConfigCLI --status
-ClaudeAutoConfigCLI --add-secret KEY=VALUE
+Claude Secrets ManagerCLI --help
+Claude Secrets ManagerCLI --status
+Claude Secrets ManagerCLI --add-secret KEY=VALUE
 
 # Debug
 cat ~/Library/Application\ Support/Claude/claude_desktop_config_test.json
-tail -f /tmp/ClaudeAutoConfig.log
+tail -f /tmp/Claude Secrets Manager.log
 
 # LaunchAgent Management
-ClaudeAutoConfigCLI --start-daemon
-ClaudeAutoConfigCLI --stop-daemon
-ClaudeAutoConfigCLI --daemon-status
+Claude Secrets ManagerCLI --start-daemon
+Claude Secrets ManagerCLI --stop-daemon
+Claude Secrets ManagerCLI --daemon-status
 
 # Production Switch (in source code)
-# Change these lines in Sources/ClaudeAutoConfig/main.swift:  
+# Change these lines in Sources/Claude Secrets Manager/main.swift:  
 static let targetApplication = "Claude.app"
 static let targetExecutable = "claude"
 ```

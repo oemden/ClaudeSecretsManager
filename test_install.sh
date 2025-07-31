@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ###############################################################################
-# ClaudeAutoConfig Test Installation Script
+# Claude Secrets Manager Test Installation Script
 # Simulates what Packages.app installer will do
 # This script is for testing purposes only and should not be used in production environments.
 # It assumes you have already built the binary using `swift build -c release`
@@ -10,19 +10,19 @@
 
 set -e
 
-echo "🧪 ClaudeAutoConfig Test Installation"
+echo "🧪 Claude Secrets Manager Test Installation"
 echo "======================================"
 
 # Build first
-echo "🔨 Building ClaudeAutoConfig..."
+echo "🔨 Building Claude Secrets Manager..."
 swift build -c release
 
 BUILD_DIR=".build/release"
-BINARY_DAEMON="ClaudeAutoConfig"
-BINARY_CLI="ClaudeAutoConfigCLI"
+BINARY_DAEMON="claudesecrets"
+BINARY_CLI="claudesecrets-cli"
 BINARY_DAEMON_SOURCE="${PWD}/${BUILD_DIR}/${BINARY_DAEMON}"
 BINARY_CLI_SOURCE="${PWD}/${BUILD_DIR}/${BINARY_CLI}"
-PLIST_SOURCE="${PWD}/com.oemden.claudeautoconfig.plist"
+PLIST_SOURCE="${PWD}/com.oemden.claudesecrets.plist"
 
 # Installation paths
 ENV="dev" # Change to "prod" for production install
@@ -33,7 +33,7 @@ BINARY_DAEMON_DEST_PROD="${BINARY_DEST_DIR_PROD}/${BINARY_DAEMON}"
 BINARY_DAEMON_DEST_DEV="${BINARY_DEST_DIR_DEV}/${BINARY_DAEMON}"
 BINARY_CLI_DEST_PROD="${BINARY_DEST_DIR_PROD}/${BINARY_CLI}"
 BINARY_CLI_DEST_DEV="${BINARY_DEST_DIR_DEV}/${BINARY_CLI}"
-PLIST_DEST="${HOME}/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+PLIST_DEST="${HOME}/Library/LaunchAgents/com.oemden.claudesecrets.plist"
 
 echo ""
 echo "📦 Installing files..."
@@ -111,10 +111,10 @@ cp "${PLIST_SOURCE}" "${PLIST_DEST}"
 # Update binary path in plist based on environment
 echo "🔧 Updating plist binary path for ${ENV} environment..."
 if [ "${ENV}" == "prod" ]; then
-    sed -i '' "s|<string>/usr/local/bin/ClaudeAutoConfig</string>|<string>${BINARY_DAEMON_DEST}</string>|g" "${PLIST_DEST}"
+    sed -i '' "s|<string>/usr/local/bin/claudesecrets</string>|<string>${BINARY_DAEMON_DEST}</string>|g" "${PLIST_DEST}"
     echo "   ✅ Updated plist to use: ${BINARY_DAEMON_DEST}"
 elif [ "${ENV}" == "dev" ]; then
-    sed -i '' "s|<string>/usr/local/bin/ClaudeAutoConfig</string>|<string>${BINARY_DAEMON_DEST}</string>|g" "${PLIST_DEST}"
+    sed -i '' "s|<string>/usr/local/bin/claudesecrets</string>|<string>${BINARY_DAEMON_DEST}</string>|g" "${PLIST_DEST}"
     echo "   ✅ Updated plist to use: ${BINARY_DAEMON_DEST}"
 fi
 echo "   ✅ Plist installed: ${PLIST_DEST}"
@@ -132,8 +132,8 @@ echo ""
 echo "✅ Installation complete!"
 echo ""
 echo "🧪 Test Steps:"
-echo "1. Delete your com.oemden.claudeautoconfig preferences:"
-echo "   rm ~/Library/Preferences/com.oemden.claudeautoconfig.plist"
+echo "1. Delete your com.oemden.claudesecrets preferences:"
+echo "   rm ~/Library/Preferences/com.oemden.claudesecrets.plist"
 echo ""
 echo "2. Launch TextEdit to trigger the daemon:"
 echo "   open -a TextEdit"

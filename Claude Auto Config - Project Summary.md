@@ -10,7 +10,7 @@ A macOS daemon that monitors Claude Desktop launch/quit events and automatically
 - ✅ File permissions (sets 600 on output)
 - ✅ Preferences management with `defaults`
 - ✅ LaunchAgent setup (complete with dev/prod installation)
-- ✅ Dedicated CLI executable (ClaudeAutoConfigCLI)
+- ✅ Dedicated CLI executable (Claude Secrets ManagerCLI)
 - ✅ Dynamic bundle ID detection using osascript
 - ✅ Dynamic executable path detection using 'which'
 - ✅ Fixed security flaw (secrets loaded on-demand, not cached)
@@ -29,10 +29,10 @@ A macOS daemon that monitors Claude Desktop launch/quit events and automatically
 ├── test_install.sh              # Installation script (dev/prod modes)
 ├── check_setup.sh               # Setup verification script
 ├── Sources/
-│   ├── ClaudeAutoConfig/
+│   ├── Claude Secrets Manager/
 │   │   ├── main.swift           # Main daemon executable
 │   │   └── SecretsParser.swift  # Secrets parsing & template processing
-│   └── ClaudeAutoConfigCLI/
+│   └── Claude Secrets ManagerCLI/
 │       └── main.swift           # Dedicated CLI executable
 └── secrets/
     └── claude_secrets           # Secret values file
@@ -109,7 +109,7 @@ make check    # Verify setup
 
 ### Completed in v0.2.0
 1. ✅ **Dynamic Configuration System**: Two-line change switches between dev/semi-prod/prod
-2. ✅ **Dedicated CLI Executable**: ClaudeAutoConfigCLI for all management tasks
+2. ✅ **Dedicated CLI Executable**: Claude Secrets ManagerCLI for all management tasks
 3. ✅ **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
 4. ✅ **Security Fixes**: On-demand secrets loading, no memory caching
 5. ✅ **Process Detection**: Fixed claude executable detection and false termination
@@ -145,7 +145,7 @@ make check    # Verify setup
 
 **Deployment Steps**:
 ```bash
-# Set production mode in Sources/ClaudeAutoConfig/main.swift:
+# Set production mode in Sources/Claude Secrets Manager/main.swift:
 static let targetApplication = "Claude.app"
 static let targetExecutable = "claude"
 
@@ -154,7 +154,7 @@ swift build -c release
 ./test_install.sh prod
 
 # Manage via CLI
-ClaudeAutoConfigCLI --help
+Claude Secrets ManagerCLI --help
 ```
 
 ## Debugging Commands
@@ -170,7 +170,7 @@ make test
 cat ~/Library/Application\ Support/Claude/claude_desktop_config_test.json
 
 # Monitor system logs
-log stream --predicate 'process == "ClaudeAutoConfig"'
+log stream --predicate 'process == "Claude Secrets Manager"'
 ```
 
 ## Security Notes

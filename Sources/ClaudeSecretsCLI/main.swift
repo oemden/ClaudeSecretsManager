@@ -1,24 +1,25 @@
 #!/usr/bin/env swift
 
 import Foundation
+import SharedConstants
 
 // MARK: - Shared Components (will be moved to shared module later)
 
 // Copy of Preferences class needed for CLI
 struct Preferences {
-    private static let suiteName = "com.oemden.claudeautoconfig"
+    private static let suiteName = SharedConstants.suiteName
     private static let customDefaults = UserDefaults(suiteName: suiteName) ?? UserDefaults.standard
     
     static var secretsFile: String {
-        customDefaults.string(forKey: "secrets_file") ?? "~/.claudeautoconfig/.claude_secrets"
+        customDefaults.string(forKey: "secrets_file") ?? SharedConstants.secretsPath
     }
     
     static var templateClaudeDesktopConfigFile: String {
-        customDefaults.string(forKey: "template_claudedesktop_config_file") ?? "~/Library/Application Support/Claude/claude_desktop_config_template.json"
+        customDefaults.string(forKey: "template_claudedesktop_config_file") ?? SharedConstants.templatePath
     }
     
     static var targetClaudeDesktopConfigFile: String {
-        customDefaults.string(forKey: "target_claudedesktop_config_file") ?? "~/Library/Application Support/Claude/claude_desktop_config_test.json"
+        customDefaults.string(forKey: "target_claudedesktop_config_file") ?? SharedConstants.outputPath
     }
     
     static var voiceNotifications: Bool {
@@ -132,11 +133,11 @@ extension String {
 struct CLICommands {
     static func showHelp() {
         print("""
-        ClaudeAutoConfigCLI - Claude Desktop & Claude Code Configuration Manager
+        claudesecrets-cli - Claude Desktop & Claude Code Configuration Manager
         
         USAGE:
-            claudeautoconfig [OPTIONS]
-            claudeautoconfig [COMMAND] [ARGUMENTS]
+            claudesecrets-cli [OPTIONS]
+            claudesecrets-cli [COMMAND] [ARGUMENTS]
         
         OPTIONS:
             -h, --help                     Show this help message
@@ -154,7 +155,7 @@ struct CLICommands {
             -m, --mechanism [file|keychain] Set storage mechanism for secrets
                                          (use with --add/--delete)
             -t, --template                Create template from current Claude config
-            -r, --reset                   Reset to default ClaudeAutoConfig settings
+            -r, --reset                   Reset to default claudesecrets settings
             -I, --install                 Install LaunchAgent plist (doesn't start)
             -U, --uninstall               Remove LaunchAgent plist (stops if running)
             -E, --enable                  Enable and start LaunchAgent daemon
@@ -338,7 +339,7 @@ struct CLICommands {
                 return true
                 
             case "--daemon":
-                print("❌ --daemon mode should be handled by ClaudeAutoConfig, not ClaudeAutoConfigCLI")
+                print("❌ --daemon mode should be handled by claudesecrets, not claudesecrets-cli")
                 return false
                 
             case "-R", "--restore":
@@ -381,13 +382,13 @@ struct CLICommands {
     }
     
     static func setVoiceNotifications(enabled: Bool) {
-        let defaults = UserDefaults(suiteName: "com.oemden.claudeautoconfig") ?? UserDefaults.standard
+        let defaults = UserDefaults(suiteName: SharedConstants.suiteName) ?? UserDefaults.standard
         defaults.set(enabled, forKey: "voice_notifications")
         print("🔊 Voice notifications: \(enabled ? "ENABLED" : "DISABLED")")
     }
     
     static func setMacOSNotifications(enabled: Bool) {
-        let defaults = UserDefaults(suiteName: "com.oemden.claudeautoconfig") ?? UserDefaults.standard
+        let defaults = UserDefaults(suiteName: SharedConstants.suiteName) ?? UserDefaults.standard
         defaults.set(enabled, forKey: "macos_notifications")
         print("📱 macOS notifications: \(enabled ? "ENABLED" : "DISABLED")")
     }
@@ -519,7 +520,7 @@ struct CLICommands {
     static func createTemplateFromCurrentConfig() {
         print("📄 Creating template from current Claude Desktop config...")
         
-        let configPath = "~/Library/Application Support/Claude/claude_desktop_config.json".expandingTildeInPath
+        let configPath = SharedConstants.outputPath.expandingTildeInPath
         let templatePath = Preferences.templateClaudeDesktopConfigFile.expandingTildeInPath
         
         guard FileManager.default.fileExists(atPath: configPath) else {
@@ -536,17 +537,17 @@ struct CLICommands {
     }
     
     static func resetConfiguration() {
-        print("🔄 Resetting ClaudeAutoConfig to defaults...")
+        print("🔄 Resetting Claude Secrets Manager to defaults...")
         
-        let defaults = UserDefaults(suiteName: "com.oemden.claudeautoconfig") ?? UserDefaults.standard
-        defaults.removePersistentDomain(forName: "com.oemden.claudeautoconfig")
+        let defaults = UserDefaults(suiteName: SharedConstants.suiteName) ?? UserDefaults.standard
+        defaults.removePersistentDomain(forName: SharedConstants.suiteName)
         
         print("✅ Configuration reset to defaults")
         print("   Note: You may need to run setup again")
     }
     
     static func showStatus() {
-        print("📊 ClaudeAutoConfig Status")
+        print("📊 Claude Secrets Manager Status")
         print(String(repeating: "=", count: 40))
         
         // Check if daemon is running
@@ -554,7 +555,7 @@ struct CLICommands {
         print("🔄 Daemon Status: \(daemonRunning ? "RUNNING" : "STOPPED")")
         
         // Check LaunchAgent status
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/\(SharedConstants.launchAgentPlistName)"
         let launchAgentInstalled = FileManager.default.fileExists(atPath: launchAgentPath)
         print("📦 LaunchAgent: \(launchAgentInstalled ? "INSTALLED" : "NOT INSTALLED")")
         
@@ -576,7 +577,7 @@ struct CLICommands {
     }
     
     static func showConfig() {
-        print("⚙️  ClaudeAutoConfig Configuration")
+        print("⚙️  Claude Secrets Manager Configuration")
         print(String(repeating: "=", count: 40))
         
         print("📁 File Paths:")
@@ -603,7 +604,7 @@ struct CLICommands {
     static func isDaemonRunning() -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        process.arguments = ["-f", "ClaudeAutoConfig"]
+        process.arguments = ["-f", "claudesecrets"]
         
         do {
             try process.run()
@@ -615,14 +616,14 @@ struct CLICommands {
     }
     
     static func installLaunchAgent() {
-        print("📦 Installing ClaudeAutoConfig LaunchAgent...")
+        print("📦 Installing Claude Secrets Manager LaunchAgent...")
         
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
-        let binaryPath = "/usr/local/bin/ClaudeAutoConfig"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/\(SharedConstants.launchAgentPlistName)"
+        let binaryPath = SharedConstants.defaultBinaryPath
         
         // Check if binary exists
         guard FileManager.default.fileExists(atPath: binaryPath) else {
-            print("❌ ClaudeAutoConfig binary not found at: \(binaryPath)")
+            print("❌ claudesecrets binary not found at: \(binaryPath)")
             print("   Please install the binary first or check the installation path")
             return
         }
@@ -633,7 +634,7 @@ struct CLICommands {
         <plist version="1.0">
         <dict>
             <key>Label</key>
-            <string>com.oemden.claudeautoconfig</string>
+            <string>\(SharedConstants.launchAgentIdentifier)</string>
             <key>ProgramArguments</key>
             <array>
                 <string>\(binaryPath)</string>
@@ -643,9 +644,9 @@ struct CLICommands {
             <key>KeepAlive</key>
             <true/>
             <key>StandardOutPath</key>
-            <string>/tmp/ClaudeAutoConfig.log</string>
+            <string>/tmp/claudesecrets.log</string>
             <key>StandardErrorPath</key>
-            <string>/tmp/ClaudeAutoConfig.error.log</string>
+            <string>/tmp/claudesecrets.error.log</string>
         </dict>
         </plist>
         """
@@ -656,7 +657,7 @@ struct CLICommands {
             try FileManager.default.createDirectory(atPath: launchAgentsDir, withIntermediateDirectories: true, attributes: nil)
             
             // Write plist file
-            try plistContent.write(toFile: launchAgentPath, atomically: true, encoding: .utf8)
+            try plistContent.write(toFile: launchAgentPath, atomically: true, encoding: String.Encoding.utf8)
             
             print("✅ LaunchAgent plist installed: \(launchAgentPath)")
             print("📋 Use --enable to start the daemon")
@@ -667,9 +668,9 @@ struct CLICommands {
     }
     
     static func uninstallLaunchAgent() {
-        print("🗑️  Uninstalling ClaudeAutoConfig LaunchAgent...")
+        print("🗑️  Uninstalling Claude Secrets Manager LaunchAgent...")
         
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/\(SharedConstants.launchAgentPlistName)"
         
         // First stop the daemon if running
         disableLaunchAgent()
@@ -688,9 +689,9 @@ struct CLICommands {
     }
     
     static func enableLaunchAgent() {
-        print("🚀 Enabling ClaudeAutoConfig LaunchAgent...")
+        print("🚀 Enabling Claude Secrets Manager LaunchAgent...")
         
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/\(SharedConstants.launchAgentPlistName)"
         
         guard FileManager.default.fileExists(atPath: launchAgentPath) else {
             print("❌ LaunchAgent not installed. Run --install first.")
@@ -717,9 +718,9 @@ struct CLICommands {
     }
     
     static func disableLaunchAgent() {
-        print("🛑 Disabling ClaudeAutoConfig LaunchAgent...")
+        print("🛑 Disabling Claude Secrets Manager LaunchAgent...")
         
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/\(SharedConstants.launchAgentPlistName)"
         
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -743,8 +744,8 @@ struct CLICommands {
     static func restoreOriginalConfig() {
         print("🔄 Restoring original Claude Desktop configuration...")
         
-        let configPath = "~/Library/Application Support/Claude/claude_desktop_config.json".expandingTildeInPath
-        let backupPath = "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json".expandingTildeInPath
+        let configPath = SharedConstants.outputPath.expandingTildeInPath
+        let backupPath = SharedConstants.backupPath.expandingTildeInPath
         
         guard FileManager.default.fileExists(atPath: backupPath) else {
             print("❌ Backup file not found: \(backupPath)")

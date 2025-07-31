@@ -14,13 +14,13 @@ run:
 # Run in debug mode
 debug:
 	swift build
-	./.build/debug/ClaudeAutoConfig
+	./.build/debug/claudesecrets
 
 # Test with TextEdit
 test: build
 	@echo "🧪 Testing with TextEdit.app"
 	@echo "📌 Launch and quit TextEdit to test the monitor"
-	./.build/release/ClaudeAutoConfig
+	./.build/release/claudesecrets
 
 # Check setup
 check:
@@ -39,7 +39,8 @@ clean:
 # Install to /usr/local/bin (requires sudo)
 install: build
 	@echo "📦 Installing to /usr/local/bin/"
-	sudo cp ./.build/release/ClaudeAutoConfig /usr/local/bin/
+	sudo cp ./.build/release/claudesecrets /usr/local/bin/
+	sudo cp ./.build/release/claudesecrets-cli /usr/local/bin/
 
 # Create LaunchDaemon plist
 plist:

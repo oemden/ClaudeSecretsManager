@@ -1,18 +1,18 @@
 import Foundation
 import AppKit
 import UserNotifications
+import SharedConstants
 
 // MARK: - Configuration
 struct Config {
-    // Change these two lines to switch applications/executables
-    static let targetApplication = "Claude.app"     // "TextEdit.app" or "Claude.app"  
-    static let targetExecutable = "claude"           // "sleep" or "claude"
+    // Using shared constants
+    static let targetApplication = SharedConstants.targetApplication
+    static let targetExecutable = SharedConstants.targetExecutable
     
-    static let claudeConfigDir = "~/Library/Application Support/Claude"
-    static let templatePath = "\(claudeConfigDir)/claude_desktop_config_template.json"
-    // static let outputPath: String "\(claudeConfigDir)/claude_desktop_config_test.json" // Test file for safety
-    static let outputPath = "\(claudeConfigDir)/claude_desktop_config.json" // real file for production use
-    static let secretsPath = "~/.claudeautoconfig/.claude_secrets"
+    static let claudeConfigDir = SharedConstants.claudeConfigDir
+    static let templatePath = SharedConstants.templatePath
+    static let outputPath = SharedConstants.outputPath
+    static let secretsPath = SharedConstants.secretsPath
     
     // Auto-deduce bundle IDs dynamically from app name (cached)
     static var targetAppBundleID: String {
@@ -127,7 +127,7 @@ struct Config {
 
 // MARK: - Preferences
 struct Preferences {
-    static let domain = "com.oemden.claudeautoconfig"
+    static let domain = "com.oemden.claudesecrets"
     
     // Claude Desktop file paths
     static var targetClaudeDesktopConfigFile: String {
@@ -787,23 +787,23 @@ SECRET_TOKEN=your_secret_token_here
         print("\n📋 TO SETUP WITH DEFAULT PREFERENCES, RUN:")
         print("""
         # File paths
-        defaults write com.oemden.claudeautoconfig target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_test.json"
-        defaults write com.oemden.claudeautoconfig template_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
-        defaults write com.oemden.claudeautoconfig first_run_claudedesktop_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
+        defaults write com.oemden.claudesecrets target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_test.json"
+        defaults write com.oemden.claudesecrets template_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
+        defaults write com.oemden.claudesecrets first_run_claudedesktop_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
         
-        defaults write com.oemden.claudeautoconfig secrets_file "~/.claudeautoconfig/.claude_secrets"
+        defaults write com.oemden.claudesecrets secrets_file "~/.claudesecrets/.claude_secrets"
         
         # Notifications
-        defaults write com.oemden.claudeautoconfig voice_notifications -bool true
-        defaults write com.oemden.claudeautoconfig macos_notifications -bool true
+        defaults write com.oemden.claudesecrets voice_notifications -bool true
+        defaults write com.oemden.claudesecrets macos_notifications -bool true
         
         # App management
-        defaults write com.oemden.claudeautoconfig manage_ClaudeDesktop_config -bool true
-        defaults write com.oemden.claudeautoconfig manage_ClaudeCode_config -bool true
-        defaults write com.oemden.claudeautoconfig shareClaudeDesktop_config_withClaudeCode -bool true
+        defaults write com.oemden.claudesecrets manage_ClaudeDesktop_config -bool true
+        defaults write com.oemden.claudesecrets manage_ClaudeCode_config -bool true
+        defaults write com.oemden.claudesecrets shareClaudeDesktop_config_withClaudeCode -bool true
         
         # Mark setup complete
-        defaults write com.oemden.claudeautoconfig first_run_done -bool true
+        defaults write com.oemden.claudesecrets first_run_done -bool true
         """)
         
         print("\n📁 THEN CREATE REQUIRED FILES:")
@@ -941,7 +941,7 @@ class AppMonitor {
                 Logger.shared.info("🚀 No config exists for existing processes - checking if plist exists first")
                 
                 // Check if plist exists FIRST - before any settings checks (working de5c13c logic)
-                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
+                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudesecrets.plist"
                 let plistExists = FileManager.default.fileExists(atPath: plistPath)
                 
                 if !plistExists {
@@ -1209,7 +1209,7 @@ class AppMonitor {
                 Logger.shared.info("🚀 No config exists - checking if plist exists first")
                 
                 // Check if plist exists FIRST - before any settings checks (working de5c13c logic)
-                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudeautoconfig.plist"
+                let plistPath = "/Users/\(NSUserName())/Library/Preferences/com.oemden.claudesecrets.plist"
                 let plistExists = FileManager.default.fileExists(atPath: plistPath)
                 
                 if !plistExists {
@@ -1410,7 +1410,7 @@ class AppMonitor {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
             
-            let binaryPath = Config.targetExecutablePath
+            let _ = Config.targetExecutablePath  // Unused but available if needed
             let processName = Config.targetExecutableName
             
             if processName == "sleep" {
@@ -1893,7 +1893,7 @@ struct CLICommands {
     static func setVoiceNotifications(enabled: Bool) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
-        process.arguments = ["write", "com.oemden.claudeautoconfig", "voice_notifications", "-bool", enabled ? "true" : "false"]
+        process.arguments = ["write", "com.oemden.claudesecrets", "voice_notifications", "-bool", enabled ? "true" : "false"]
         
         do {
             try process.run()
@@ -1907,7 +1907,7 @@ struct CLICommands {
     static func setMacOSNotifications(enabled: Bool) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
-        process.arguments = ["write", "com.oemden.claudeautoconfig", "macos_notifications", "-bool", enabled ? "true" : "false"]
+        process.arguments = ["write", "com.oemden.claudesecrets", "macos_notifications", "-bool", enabled ? "true" : "false"]
         
         do {
             try process.run()
@@ -2084,14 +2084,14 @@ struct CLICommands {
         }
         
         // Check LaunchAgent status
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudesecrets.plist"
         if FileManager.default.fileExists(atPath: launchAgentPath) {
             print("🟢 LaunchAgent: INSTALLED")
             
             // Check if loaded
             let launchctl = Process()
             launchctl.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            launchctl.arguments = ["list", "com.oemden.claudeautoconfig"]
+            launchctl.arguments = ["list", "com.oemden.claudesecrets"]
             launchctl.standardOutput = Pipe()
             launchctl.standardError = Pipe()
             
@@ -2176,11 +2176,11 @@ struct CLICommands {
         
         // TODO: UNCOMMENT WHEN READY TO TEST WITH ADMIN
         /*
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
-        let bundlePlistPath = Bundle.main.path(forResource: "com.oemden.claudeautoconfig", ofType: "plist")
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudesecrets.plist"
+        let bundlePlistPath = Bundle.main.path(forResource: "com.oemden.claudesecrets", ofType: "plist")
         
         guard let sourcePlistPath = bundlePlistPath else {
-            print("❌ Could not find com.oemden.claudeautoconfig.plist in bundle")
+            print("❌ Could not find com.oemden.claudesecrets.plist in bundle")
             return
         }
         
@@ -2205,7 +2205,7 @@ struct CLICommands {
         */
         
         print("📝 This will create:")
-        print("   ~/Library/LaunchAgents/com.oemden.claudeautoconfig.plist")
+        print("   ~/Library/LaunchAgents/com.oemden.claudesecrets.plist")
         print("   ~/Library/Logs/ClaudeAutoConfig.log")
         print("🚧 Implementation commented out - requires admin testing")
     }
@@ -2215,7 +2215,7 @@ struct CLICommands {
         
         // TODO: UNCOMMENT WHEN READY TO TEST WITH ADMIN
         /*
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudesecrets.plist"
         
         // First disable if loaded
         disableLaunchAgent()
@@ -2234,14 +2234,14 @@ struct CLICommands {
         
         print("📝 This will:")
         print("   1. Disable LaunchAgent (if enabled)")
-        print("   2. Remove ~/Library/LaunchAgents/com.oemden.claudeautoconfig.plist")
+        print("   2. Remove ~/Library/LaunchAgents/com.oemden.claudesecrets.plist")
         print("🚧 Implementation commented out - requires admin testing")
     }
     
     static func enableLaunchAgent() {
         print("🚀 Enabling ClaudeAutoConfig LaunchAgent...")
         
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudesecrets.plist"
         
         guard FileManager.default.fileExists(atPath: launchAgentPath) else {
             print("❌ LaunchAgent not installed. Run --install first.")
@@ -2288,7 +2288,7 @@ struct CLICommands {
     static func disableLaunchAgent() {
         print("🛑 Disabling ClaudeAutoConfig LaunchAgent...")
         
-        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.oemden.claudesecrets.plist"
         
         guard FileManager.default.fileExists(atPath: launchAgentPath) else {
             print("ℹ️  LaunchAgent not installed")

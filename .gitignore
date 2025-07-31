@@ -46,6 +46,7 @@ test_*.swift
 # Build outputs
 ClaudeAutoConfig
 *.dSYM/
+Packages/build/
 
 # Backup files
 *.backup
@@ -58,3 +59,4 @@ tmp/
 
 0livoem
 CLAUDE.md
+

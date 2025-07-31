@@ -1,65 +1,139 @@
 #!/bin/bash
 
 ###############################################################################
-# Claude Secrets Manager - Package Pre-Installation Script
-# Runs before package installation to protect existing configurations
-# This script is called automatically by the macOS installer
+# Claude Secrets Manager - Package Pre-Installation Script - Version "0.3.1"
+# Performs essential checks and backup operations before installation
+# Simplified version following XCreds patterns
 ###############################################################################
 
-set -e
+set -x
 
-# Package installer environment
-PACKAGE_PATH="$1"
-DESTINATION_PATH="$2"
-DESTINATION_VOLUME="$3"
-ROOT_PATH="$4"
+# Standard package installer parameters
+PACKAGE_PATH="${1}"
+TARGET="${2}"       # Target path (destination)
+TARGET_VOLUME="${3}" # Target volume
 
-echo "🚀 Claude Secrets Manager - Pre-Installation"
-echo "============================================"
+echo "🎯 Claude Secrets Manager - Pre-Installation"
+echo "============================================="
 echo "Package: $PACKAGE_PATH"
-echo "Destination: $DESTINATION_PATH"
-echo "Volume: $DESTINATION_VOLUME"
-echo "Root: $ROOT_PATH"
+echo "Target: $TARGET"
+echo "Volume: $TARGET_VOLUME"
 
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-echo ""
-echo "🔒 Running failsafe protection..."
-
-# Run failsafe protection script
-if [[ -f "$SCRIPT_DIR/failsafe-protection.sh" ]]; then
-    bash "$SCRIPT_DIR/failsafe-protection.sh"
-    if [[ $? -eq 0 ]]; then
-        echo "✅ Failsafe protection completed successfully"
+# Function to detect console user
+detect_console_user() {
+    local console_user=""
+    console_user=$(/bin/ls -l /dev/console 2>/dev/null | /usr/bin/awk '{ print $3 }')
+    if [[ -n "$console_user" && "$console_user" != "root" ]]; then
+        echo "$console_user"
     else
-        echo "❌ Failsafe protection failed"
-        exit 1
+        # Fallback: try who command
+        console_user=$(who | grep console | awk '{ print $1 }' | head -1)
+        echo "$console_user"
     fi
-else
-    echo "❌ Failsafe protection script not found: $SCRIPT_DIR/failsafe-protection.sh"
-    exit 1
+}
+
+# Function to get user home directory
+get_user_home() {
+    local username="$1"
+    local user_home=""
+    user_home=$(dscl . -read "/Users/$username" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+    if [[ -z "$user_home" ]]; then
+        user_home="/Users/$username"
+    fi
+    echo "$user_home"
+}
+
+# Detect the console user
+CONSOLE_USER=$(detect_console_user)
+if [[ -z "$CONSOLE_USER" || "$CONSOLE_USER" == "root" ]]; then
+    echo "⚠️  Warning: Could not detect console user, using fallback"
+    CONSOLE_USER="$(ls /Users | grep -v Shared | head -1)"
 fi
 
-echo ""
-echo "👤 Setting up user permissions..."
+echo "👤 Detected console user: $CONSOLE_USER"
 
-# Run user permission handler
-if [[ -f "$SCRIPT_DIR/user-permission-handler.sh" ]]; then
-    bash "$SCRIPT_DIR/user-permission-handler.sh"
-    if [[ $? -eq 0 ]]; then
-        echo "✅ User permissions configured successfully"
-    else
-        echo "❌ User permission setup failed"
-        exit 1
-    fi
-else
-    echo "❌ User permission handler not found: $SCRIPT_DIR/user-permission-handler.sh"
-    exit 1
+# Get user home directory
+USER_HOME=$(get_user_home "$CONSOLE_USER")
+echo "🏠 User home directory: $USER_HOME"
+
+echo ""
+echo "🛡️  Checking for existing files..."
+
+# Check for existing secrets file
+SECRETS_FILE="${USER_HOME}/.claudesecrets/.claude_secrets"
+if [[ -f "$SECRETS_FILE" ]]; then
+    echo "   🔐 Found existing secrets file: $SECRETS_FILE"
+    
+    # Create simple backup with timestamp
+    BACKUP_DIR="${USER_HOME}/.claudesecrets/backups"
+    TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+    BACKUP_FILE="${BACKUP_DIR}/claude_secrets.backup.${TIMESTAMP}"
+    
+    mkdir -p "$BACKUP_DIR"
+    cp "$SECRETS_FILE" "$BACKUP_FILE"
+    chown "$CONSOLE_USER:staff" "$BACKUP_FILE"
+    chmod 600 "$BACKUP_FILE"
+    
+    echo "   ✅ Backup created: $BACKUP_FILE"
+    echo "   🛡️  Existing secrets file will be preserved"
 fi
 
+# Check for existing template file
+TEMPLATE_FILE="${USER_HOME}/Library/Application Support/Claude/claude_desktop_config_template.json"
+if [[ -f "$TEMPLATE_FILE" ]]; then
+    echo "   📋 Found existing template file: $TEMPLATE_FILE"
+    
+    # Create simple backup with timestamp  
+    BACKUP_DIR="${USER_HOME}/Library/Application Support/Claude/backups"
+    TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+    BACKUP_FILE="${BACKUP_DIR}/claude_desktop_config_template.backup.${TIMESTAMP}.json"
+    
+    mkdir -p "$BACKUP_DIR"
+    cp "$TEMPLATE_FILE" "$BACKUP_FILE"
+    chown "$CONSOLE_USER:staff" "$BACKUP_FILE"
+    chmod 644 "$BACKUP_FILE"
+    
+    echo "   ✅ Backup created: $BACKUP_FILE"
+    echo "   🛡️  Existing template file will be preserved"
+fi
+
+# Check for existing Claude config file
+CONFIG_FILE="${USER_HOME}/Library/Application Support/Claude/claude_desktop_config.json"
+if [[ -f "$CONFIG_FILE" ]]; then
+    echo "   ⚙️  Found existing Claude config: $CONFIG_FILE"
+    
+    # Create simple backup with timestamp
+    BACKUP_DIR="${USER_HOME}/Library/Application Support/Claude/backups"
+    TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+    BACKUP_FILE="${BACKUP_DIR}/claude_desktop_config.backup.${TIMESTAMP}.json"
+    
+    mkdir -p "$BACKUP_DIR"
+    cp "$CONFIG_FILE" "$BACKUP_FILE"
+    chown "$CONSOLE_USER:staff" "$BACKUP_FILE"
+    chmod 644 "$BACKUP_FILE"
+    
+    echo "   ✅ Backup created: $BACKUP_FILE"
+    echo "   🛡️  Existing Claude config will be preserved"
+fi
+
+# Stop any running claudesecrets daemon before installation
 echo ""
-echo "🛡️  Pre-installation protection complete"
-echo "📦 Package installation can proceed safely"
+echo "🛑 Stopping any running Claude Secrets Manager daemon..."
+
+# Try to stop via launchctl first
+PLIST_PATH="${USER_HOME}/Library/LaunchAgents/com.oemden.claudesecrets.plist"
+if [[ -f "$PLIST_PATH" ]]; then
+    sudo -u "$CONSOLE_USER" launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    echo "   ✅ LaunchAgent unloaded"
+fi
+
+# Kill any running processes
+pkill -f "claudesecrets" 2>/dev/null || true
+sleep 1
+
+echo ""
+echo "✅ Pre-installation complete"
+echo "🛡️  All existing configuration files have been backed up"
+echo "📦 Ready for package installation"
 
 exit 0

@@ -12,8 +12,6 @@ set -x
 PACKAGE_PATH="${1}"
 TARGET="${2}"       # Target path (destination) 
 TARGET_VOLUME="${3}" # Target volume
-loggedInUser=$(stat -f %Su /dev/console)
-userID=$(id -u "$loggedInUser")
 
 echo "🎯 Claude Secrets Manager - Post-Installation"
 echo "=============================================="
@@ -21,18 +19,19 @@ echo "Package: $PACKAGE_PATH"
 echo "Target: $TARGET"
 echo "Volume: $TARGET_VOLUME"
 
-# # Function to detect console user (XCreds pattern)
-# detect_console_user() {
-#     local console_user=""
-#     console_user=$(/bin/ls -l /dev/console 2>/dev/null | /usr/bin/awk '{ print $3 }')
-#     if [[ -n "$console_user" && "$console_user" != "root" ]]; then
-#         echo "$console_user"
-#     else
-#         # Fallback: try who command
-#         console_user=$(who | grep console | awk '{ print $1 }' | head -1)
-#         echo "$console_user"
-#     fi
-# }
+# Function to detect console user (XCreds pattern)
+detect_console_user() {
+    local console_user=""
+    console_user=$(/bin/ls -l /dev/console 2>/dev/null | /usr/bin/awk '{ print $3 }')
+    if [[ -n "$console_user" && "$console_user" != "root" ]]; then
+        echo "$console_user"
+    else
+        # Fallback: try who command
+        console_user=$(who | grep console | awk '{ print $1 }' | head -1)
+        echo "$console_user"
+    fi
+}
+
 
 
 # Function to get user home directory
@@ -47,47 +46,72 @@ get_user_home() {
 }
 
 # Detect the console user
-# CONSOLE_USER=$(detect_console_user)
-if [[ -z "$loggedInUser" || "$loggedInUser" == "root" ]]; then
+CONSOLE_USER=$(detect_console_user)
+if [[ -z "$CONSOLE_USER" || "$CONSOLE_USER" == "root" ]]; then
     echo "⚠️  Warning: Could not detect console user, using fallback"
-    loggedInUser="$(ls /Users | grep -v Shared | head -1)"
+    CONSOLE_USER="$(ls /Users | grep -v Shared | head -1)"
 fi
 
-echo "👤 Detected console user: $loggedInUser"
+echo "👤 Detected console user: $CONSOLE_USER"
 
 # Get user home directory
-USER_HOME=$(get_user_home "$loggedInUser")
+USER_HOME=$(get_user_home "$CONSOLE_USER")
 echo "🏠 User home directory: $USER_HOME"
 
+# echo ""
+# echo "📦 Moving binaries from /tmp to final locations..."
+
+# # Move daemon binary from /tmp/ClaudeSecretsManager to /usr/local/bin
+# if [[ -f "/tmp/ClaudeSecretsManager/claudesecrets" ]]; then
+#     mkdir -p "${TARGET}/usr/local/bin"
+#     cp "/tmp/ClaudeSecretsManager/claudesecrets" "${TARGET}/usr/local/bin/"
+#     chmod +x "${TARGET}/usr/local/bin/claudesecrets"
+#     chown root:wheel "${TARGET}/usr/local/bin/claudesecrets"
+#     rm -f "/tmp/ClaudeSecretsManager/claudesecrets"
+#     echo "   ✅ claudesecrets daemon installed to /usr/local/bin"
+# else
+#     echo "   ❌ claudesecrets binary not found in /tmp/ClaudeSecretsManager"
+#     exit 1
+# fi
+
+# # Move CLI binary from /tmp/ClaudeSecretsManager to /usr/local/bin  
+# if [[ -f "/tmp/ClaudeSecretsManager/claudesecrets-cli" ]]; then
+#     cp "/tmp/ClaudeSecretsManager/claudesecrets-cli" "${TARGET}/usr/local/bin/"
+#     chmod +x "${TARGET}/usr/local/bin/claudesecrets-cli"
+#     chown root:wheel "${TARGET}/usr/local/bin/claudesecrets-cli"
+#     rm -f "/tmp/ClaudeSecretsManager/claudesecrets-cli"
+#     echo "   ✅ claudesecrets-cli installed to /usr/local/bin"
+# else
+#     echo "   ❌ claudesecrets-cli binary not found in /tmp/ClaudeSecretsManager"
+#     exit 1
+# fi
 
 echo ""
 echo "🔧 Setting up LaunchAgent..."
 
 # Move LaunchAgent plist to user's LaunchAgents directory
 LAUNCHAGENTS_DIR="${USER_HOME}/Library/LaunchAgents"
-plistPath="${LAUNCHAGENTS_DIR}/com.oemden.claudesecrets.plist"
+PLIST_PATH="${LAUNCHAGENTS_DIR}/com.oemden.claudesecrets.plist"
 
 if [[ -f "/tmp/ClaudeSecretsManager/com.oemden.claudesecrets.plist" ]]; then
     # Create LaunchAgents directory if it doesn't exist
     if [[ ! -d "$LAUNCHAGENTS_DIR" ]]; then
         mkdir -p "$LAUNCHAGENTS_DIR"
-        chown "$loggedInUser:staff" "$LAUNCHAGENTS_DIR"
+        chown "$CONSOLE_USER:staff" "$LAUNCHAGENTS_DIR"
         chmod 755 "$LAUNCHAGENTS_DIR"
     fi
     
     # Copy plist to user's LaunchAgents directory
-    cp "/tmp/ClaudeSecretsManager/com.oemden.claudesecrets.plist" "$plistPath"
-    chown "$loggedInUser:staff" "$plistPath"
-    chmod 644 "$plistPath"
+    cp "/tmp/ClaudeSecretsManager/com.oemden.claudesecrets.plist" "$PLIST_PATH"
+    chown "$CONSOLE_USER:staff" "$PLIST_PATH"
+    chmod 644 "$PLIST_PATH"
     rm -f "/tmp/ClaudeSecretsManager/com.oemden.claudesecrets.plist"
     # Enable the daemon
-    echo "   ✅ LaunchAgent plist installed: $plistPath"
+    echo "   ✅ LaunchAgent plist installed: $PLIST_PATH"
     echo "🚀 Enabling LaunchAgent..."
-    # sudo -u "$loggedInUser" launchctl load -w "${PLIST_DEST}"
-    launchctl bootstrap gui/$userID "$plistPath"
-    # launchctl bootstrap gui/$userID /Users/$loggedInUser/Library/LaunchAgents/com.oemden.claudesecrets.plist
-
+    sudo -u "$CONSOLE_USER" launchctl load -w "$PLIST_PATH"
     echo "   ✅ LaunchAgent enabled and started"
+
 else
     echo "   ❌ LaunchAgent plist not found in /tmp/ClaudeSecretsManager"
     exit 1
@@ -100,7 +124,7 @@ echo "📁 Creating configuration directories and files (if missing)..."
 SECRETS_DIR="${USER_HOME}/.claudesecrets"
 if [[ ! -d "$SECRETS_DIR" ]]; then
     mkdir -p "$SECRETS_DIR"
-    chown "$loggedInUser:staff" "$SECRETS_DIR"
+    chown "$CONSOLE_USER:staff" "$SECRETS_DIR"
     chmod 700 "$SECRETS_DIR"
     echo "   ✅ Created secrets directory: $SECRETS_DIR"
 fi
@@ -120,7 +144,7 @@ if [[ ! -f "$SECRETS_FILE" ]]; then
 # Add your secrets below:
 
 EOF
-    chown "$loggedInUser:staff" "$SECRETS_FILE"
+    chown "$CONSOLE_USER:staff" "$SECRETS_FILE"
     chmod 600 "$SECRETS_FILE"
     echo "   ✅ Created secrets file: $SECRETS_FILE"
 else
@@ -131,7 +155,7 @@ fi
 CLAUDE_CONFIG_DIR="${USER_HOME}/Library/Application Support/Claude"
 if [[ ! -d "$CLAUDE_CONFIG_DIR" ]]; then
     mkdir -p "$CLAUDE_CONFIG_DIR"
-    chown "$loggedInUser:staff" "$CLAUDE_CONFIG_DIR"
+    chown "$CONSOLE_USER:staff" "$CLAUDE_CONFIG_DIR"
     chmod 755 "$CLAUDE_CONFIG_DIR"
     echo "   ✅ Created Claude config directory"
 fi
@@ -162,7 +186,7 @@ if [[ ! -f "$TEMPLATE_FILE" ]]; then
 EOF
         echo "   ✅ Created default template: $TEMPLATE_FILE"
     fi
-    chown "$loggedInUser:staff" "$TEMPLATE_FILE"
+    chown "$CONSOLE_USER:staff" "$TEMPLATE_FILE"
     chmod 644 "$TEMPLATE_FILE"
 else
     echo "   🛡️  Existing template file preserved: $TEMPLATE_FILE"
@@ -173,47 +197,47 @@ echo ""
 echo "⚙️  Setting up complete domain preferences..."
 
 # Read existing values for critical keys (if they exist)
-EXISTING_SECRETS_FILE=$(sudo -u "$loggedInUser" defaults read com.oemden.claudesecrets secrets_file 2>/dev/null || echo "")
-EXISTING_TEMPLATE_FILE=$(sudo -u "$loggedInUser" defaults read com.oemden.claudesecrets template_claudedesktop_config_file 2>/dev/null || echo "")
+EXISTING_SECRETS_FILE=$(sudo -u "$CONSOLE_USER" defaults read com.oemden.claudesecrets secrets_file 2>/dev/null || echo "")
+EXISTING_TEMPLATE_FILE=$(sudo -u "$CONSOLE_USER" defaults read com.oemden.claudesecrets template_claudedesktop_config_file 2>/dev/null || echo "")
 
 # Set all domain preferences (complete set)
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets always_reset_config_at_launch -bool false
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets always_secure_config -bool true
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets first_run_claudecode_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets first_run_claudedesktop_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets first_run_done -bool true
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets macos_notifications -bool true
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets manage_ClaudeCode_config -bool true
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets manage_ClaudeDesktop_config -bool true
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets always_reset_config_at_launch -bool false
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets always_secure_config -bool true
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets first_run_claudecode_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets first_run_claudedesktop_config_backup_file "~/Library/Application Support/Claude/claude_desktop_config.firstrun.backup.json"
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets first_run_done -bool true
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets macos_notifications -bool true
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets manage_ClaudeCode_config -bool true
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets manage_ClaudeDesktop_config -bool true
 
 # Handle secrets_file - preserve existing if it exists, otherwise use default
 if [[ -n "$EXISTING_SECRETS_FILE" ]]; then
-    sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_file "$EXISTING_SECRETS_FILE"
+    sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets secrets_file "$EXISTING_SECRETS_FILE"
     echo "   🛡️  Preserved existing secrets_file: $EXISTING_SECRETS_FILE"
 else
-    sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_file "~/.claudesecrets/.claude_secrets"
+    sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets secrets_file "~/.claudesecrets/.claude_secrets"
 fi
 
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_mechanism "file"
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets shareClaudeDesktop_config_withClaudeCode -bool true
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets target_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets secrets_mechanism "file"
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets shareClaudeDesktop_config_withClaudeCode -bool true
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets target_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
 
 # Handle template_claudedesktop_config_file - preserve existing if it exists, otherwise use default
 if [[ -n "$EXISTING_TEMPLATE_FILE" ]]; then
-    sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets template_claudedesktop_config_file "$EXISTING_TEMPLATE_FILE"
+    sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets template_claudedesktop_config_file "$EXISTING_TEMPLATE_FILE"
     echo "   🛡️  Preserved existing template_claudedesktop_config_file: $EXISTING_TEMPLATE_FILE"  
 else
-    sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets template_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
+    sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets template_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
 fi
 
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets template_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets voice_notifications -bool true
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets template_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
+sudo -u "$CONSOLE_USER" defaults write com.oemden.claudesecrets voice_notifications -bool true
 
 # Set proper permissions on the preferences file
 PREFS_FILE="${USER_HOME}/Library/Preferences/com.oemden.claudesecrets.plist"
 if [[ -f "$PREFS_FILE" ]]; then
-    chown "$loggedInUser:staff" "$PREFS_FILE"
+    chown "$CONSOLE_USER:staff" "$PREFS_FILE"
     chmod 600 "$PREFS_FILE"
     echo "   ✅ Preferences file permissions set: $PREFS_FILE"
 fi

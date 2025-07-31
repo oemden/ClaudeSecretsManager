@@ -4,10 +4,10 @@
 echo "🔍 Checking paths..."
 
 # Check secrets file
-if [ -f ~/dev/Claude\ Auto\ Config/secrets/claude_secrets ]; then
+if [ -f ~/.claudesecrets/claude_secrets ]; then
     echo "✅ Secrets file exists"
 else
-    echo "❌ Secrets file NOT found at: ~/dev/Claude Auto Config/secrets/claude_secrets"
+    echo "❌ Secrets file NOT found at: ~/.claudesecrets/claude_secrets"
 fi
 
 # Check template file

@@ -6,6 +6,17 @@ import Foundation
 /// Shared constants used across daemon and CLI components
 public enum SharedConstants {
     
+    // MARK: - Version Information
+    
+    /// Application version (updated automatically by build script)
+    public static let version = "0.3.1"
+    
+    /// Build number (can be used for build identification)
+    public static let buildNumber = "1"
+    
+    /// Full version string
+    public static let fullVersion = "\(version).\(buildNumber)"
+    
     // MARK: - Application Configuration
     
     /// Target application to monitor (change between "TextEdit.app" and "Claude.app")

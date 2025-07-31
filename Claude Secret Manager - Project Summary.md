@@ -1,4 +1,4 @@
-# Claude Auto Config - Project Summary
+# Claude Secrets Manager - Project Summary
 
 ## Overview
 A macOS daemon that monitors Claude Desktop launch/quit events and automatically manages configuration files with secrets injection. Currently testing with TextEdit.app before switching to Claude Desktop.
@@ -17,12 +17,13 @@ A macOS daemon that monitors Claude Desktop launch/quit events and automatically
 - ✅ Fixed variable substitution corruption
 - ✅ Fixed false termination detection
 - ✅ Production-ready with Claude Desktop and claude executable
-- 🚧 Restore template on quit
-- 🚧 Keychain integration (Phase 2)
+- ✅ Keychain integration (Phase 2)
+- ✅ Prepare Packages .pkgproj
+- ✅ Create a buil-and-package.sh script to run build and cretae distribution package signed .pkg, also sign binaries in the process.
 
 ## Directory Structure
 ```
-~/dev/Claude Auto Config/
+~/dev/Claude Secrets Manager/
 ├── Package.swift                 # Swift Package Manager config
 ├── Makefile                      # Build shortcuts
 ├── README.md                     # Documentation
@@ -54,18 +55,18 @@ struct Config {
     static let claudeConfigDir = "~/Library/Application Support/Claude"
     static let templatePath = "\(claudeConfigDir)/claude_desktop_config_template.json"
     static let outputPath = "\(claudeConfigDir)/claude_desktop_config_test.json"
-    static let secretsPath = "~/dev/Claude Auto Config/secrets/claude_secrets"
+    static let secretsPath = "~/dev/Claude Secrets Manager/secrets/claude_secrets"
 }
 ```
 
 ### Required Files
 1. **Template**: `~/Library/Application Support/Claude/claude_desktop_config_template.json`
-2. **Secrets**: `~/dev/Claude Auto Config/secrets/claude_secrets`
+2. **Secrets**: `~/dev/Claude Secrets Manager/secrets/claude_secrets`
 3. **Output**: `~/Library/Application Support/Claude/claude_desktop_config_test.json`
 
 ## Secrets File Format
 ```bash
-# Claude Auto Config Secrets File
+# Claude Secrets Manager Secrets File
 # Format: KEY=VALUE or export KEY=VALUE
 
 # Basic format

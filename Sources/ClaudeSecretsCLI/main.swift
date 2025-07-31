@@ -142,10 +142,11 @@ struct CLICommands {
         
         OPTIONS:
             -h, --help                     Show this help message
+            -v, --version                  Show version information
             -s, --status                   Show current daemon and configuration status
             -c, --config                   Show current configuration settings
             -l, --list-secrets [file|keychain] List all stored secrets
-            -v, --voice [on|off]          Enable/disable voice notifications
+            -V, --voice [on|off]          Enable/disable voice notifications
             -n, --notifications [on|off]  Enable/disable macOS notifications
         
         COMMANDS:
@@ -206,6 +207,11 @@ struct CLICommands {
         """)
     }
     
+    static func showVersion() {
+        print("claudesecrets-cli version \(SharedConstants.fullVersion)")
+        print("Claude Secrets Manager - Build \(SharedConstants.buildNumber)")
+    }
+    
     static func parseArguments(_ args: [String]) -> Bool {
         guard !args.isEmpty else {
             showHelp()
@@ -221,6 +227,10 @@ struct CLICommands {
             switch arg {
             case "-h", "--help":
                 showHelp()
+                return true
+                
+            case "-v", "--version":
+                showVersion()
                 return true
                 
             case "-s", "--status":
@@ -247,7 +257,7 @@ struct CLICommands {
                 }
                 return true
                 
-            case "-v", "--voice":
+            case "-V", "--voice":
                 if i + 1 < args.count {
                     let value = args[i + 1]
                     setVoiceNotifications(enabled: value == "on" || value == "true")

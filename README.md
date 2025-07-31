@@ -10,6 +10,9 @@ As of now it seems that Claude Desktop and Code share the JSON config, yet there
 
 As of now I have not dealt with complex strings and how they are handled in a JSON file, but my few tests proved to be working.
 
+- Claude Code: 1.0.64 (Claude Code)
+- Claude Desktop: Claude 0.12.55 (d55c63)
+
 **⚠️ This is a side project - use at your own risk and ALWAYS BACKUP your config files before using the tool, although there is a built-in config backup at first run and installation process.**
 
 ## Features

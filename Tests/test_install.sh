@@ -2,30 +2,30 @@
 
 ###############################################################################
 # Claude Secrets Manager Test Installation Script
-# Simulates what Packages.app installer will do with failsafe protection
-# This script is for testing purposes only and should not be used in production environments.
+# Simulates what Packages.app installer will do
+# This script is for testing purposes only and should not be used in production MYENVironments.
 # It assumes you have already built the binary using `swift build -c release`
-# It will install the binary and plist in the appropriate locations based on the environment (dev or prod).
+# It will install the binary and plist in the appropriate locations based on the MYENVironment (dev or prod).
 ###############################################################################
 
 set -e
 
-echo "🧪 Claude Secrets Manager Test Installation (With Failsafe Protection)"
-echo "======================================================================="
+echo "🧪 Claude Secrets Manager Test Installation"
+echo "======================================"
 
 # Build first
 echo "🔨 Building Claude Secrets Manager..."
 swift build -c release
 
-BUILD_DIR=".build/release"
+BUILD_DIR="../.build/release"
 BINARY_DAEMON="claudesecrets"
 BINARY_CLI="claudesecrets-cli"
 BINARY_DAEMON_SOURCE="${PWD}/${BUILD_DIR}/${BINARY_DAEMON}"
 BINARY_CLI_SOURCE="${PWD}/${BUILD_DIR}/${BINARY_CLI}"
-PLIST_SOURCE="${PWD}/com.oemden.claudesecrets.plist"
+PLIST_SOURCE="../LaunchAgent/com.oemden.claudesecrets.plist"
 
 # Installation paths
-ENV="dev" # Change to "prod" for production install
+MYENV="dev" # Change to "prod" for production install
 BINARY_DEST_DIR_PROD="/usr/local/bin/"
 BINARY_DEST_DIR_DEV="/opt/dev/bin/"
 # Destination paths
@@ -37,9 +37,9 @@ PLIST_DEST="${HOME}/Library/LaunchAgents/com.oemden.claudesecrets.plist"
 
 echo ""
 echo "📦 Installing files..."
-if [ "${ENV}" == "prod" ]; then
+if [ "${MYENV}" == "prod" ]; then
     echo "   ⚠️ Running in prod mode, sudo required"
-elif [ "${ENV}" == "dev" ]; then
+elif [ "${MYENV}" == "dev" ]; then
     echo "   ⚠️ Running in dev mode, no sudo required"
 fi
 
@@ -62,11 +62,11 @@ fi
 
 # Create directories if needed
 echo "📁 Creating directories..."
-if [ "${ENV}" == "prod" ]; then
+if [ "${MYENV}" == "prod" ]; then
     BINARY_DEST="${BINARY_DEST_PROD}"
     BINARY_DEST_DIR="${BINARY_DEST_DIR_PROD}"
     sudo mkdir -p ${BINARY_DEST_DIR}
-elif [ "${ENV}" == "dev" ]; then
+elif [ "${MYENV}" == "dev" ]; then
     BINARY_DEST="${BINARY_DEST_DEV}"
     BINARY_DEST_DIR=${BINARY_DEST_DIR_DEV}
     mkdir -p ${BINARY_DEST_DIR}
@@ -76,11 +76,11 @@ mkdir -p "$HOME/Library/Logs"
 
 # Install daemon binary
 echo "📋 Installing daemon and cli binaries to ${BINARY_DEST_DIR}..."
-if [ "${ENV}" == "prod" ]; then
+if [ "${MYENV}" == "prod" ]; then
     BINARY_DAEMON_DEST="${BINARY_DAEMON_DEST_PROD}"
     sudo cp "${BINARY_DAEMON_SOURCE}" "${BINARY_DAEMON_DEST}"
     sudo chmod +x "${BINARY_DAEMON_DEST}"
-elif [ "${ENV}" == "dev" ]; then
+elif [ "${MYENV}" == "dev" ]; then
     BINARY_DAEMON_DEST="${BINARY_DAEMON_DEST_DEV}"
     cp "${BINARY_DAEMON_SOURCE}" "${BINARY_DAEMON_DEST}"
     chmod +x "${BINARY_DAEMON_DEST}"
@@ -89,11 +89,11 @@ echo "   ✅ Daemon binary installed: ${BINARY_DAEMON_DEST}"
 
 # Install CLI binary
 echo "📋 Installing CLI binary to ${BINARY_DEST_DIR}..."
-if [ "${ENV}" == "prod" ]; then
+if [ "${MYENV}" == "prod" ]; then
     BINARY_CLI_DEST="${BINARY_CLI_DEST_PROD}"
     sudo cp "${BINARY_CLI_SOURCE}" "${BINARY_CLI_DEST}"
     sudo chmod +x "${BINARY_CLI_DEST}"
-elif [ "${ENV}" == "dev" ]; then
+elif [ "${MYENV}" == "dev" ]; then
     BINARY_CLI_DEST="${BINARY_CLI_DEST_DEV}"
     cp "${BINARY_CLI_SOURCE}" "${BINARY_CLI_DEST}"
     chmod +x "${BINARY_CLI_DEST}"
@@ -108,54 +108,24 @@ sleep 5
 echo "📋 Installing LaunchAgent plist..."
 cp "${PLIST_SOURCE}" "${PLIST_DEST}"
 
-# Update binary path in plist based on environment
-echo "🔧 Updating plist binary path for ${ENV} environment..."
-if [ "${ENV}" == "prod" ]; then
+# Update binary path in plist based on MYENVironment
+echo "🔧 Updating plist binary path for ${MYENV} MYENVironment..."
+if [ "${MYENV}" == "prod" ]; then
     sed -i '' "s|<string>/usr/local/bin/claudesecrets</string>|<string>${BINARY_DAEMON_DEST}</string>|g" "${PLIST_DEST}"
     echo "   ✅ Updated plist to use: ${BINARY_DAEMON_DEST}"
-elif [ "${ENV}" == "dev" ]; then
+elif [ "${MYENV}" == "dev" ]; then
     sed -i '' "s|<string>/usr/local/bin/claudesecrets</string>|<string>${BINARY_DAEMON_DEST}</string>|g" "${PLIST_DEST}"
     echo "   ✅ Updated plist to use: ${BINARY_DAEMON_DEST}"
 fi
 echo "   ✅ Plist installed: ${PLIST_DEST}"
 
-# Run failsafe protection and enhanced installation
-echo ""
-echo "🛡️  Running failsafe protection..."
-if [[ -f "Packages/Scripts/failsafe-protection.sh" ]]; then
-    bash "Packages/Scripts/failsafe-protection.sh"
-else
-    echo "❌ Failsafe protection script not found"
-    exit 1
-fi
-
-echo ""
-echo "👤 Setting up user permissions..."
-if [[ -f "Packages/Scripts/user-permission-handler.sh" ]]; then
-    bash "Packages/Scripts/user-permission-handler.sh"
-else
-    echo "❌ User permission handler not found"
-    exit 1
-fi
-
-echo ""
-echo "🔧 Running enhanced installation..."
-if [[ -f "Packages/Scripts/enhanced-install.sh" ]]; then
-    bash "Packages/Scripts/enhanced-install.sh"
-else
-    echo "❌ Enhanced installation script not found"
-    exit 1
-fi
-
-# Enable the daemon (optional, can be done manually later)
-echo ""
-echo "🚀 LaunchAgent Installation (Optional)..."
-echo "   Note: This will be handled by the postinstall script in the package"
-echo "   For testing, you can manually enable with: claudesecrets-cli --enable"
+# Enable the daemon
+echo "🚀 Enabling LaunchAgent..."
+launchctl load -w "${PLIST_DEST}"
+echo "   ✅ LaunchAgent enabled and started"
 
 # Check status
-echo ""
-echo "📊 Checking installation status:"
+echo "Check daemon status:"
 ${BINARY_CLI_DEST} --status
 
 echo ""
@@ -177,7 +147,7 @@ echo "   ${BINARY_CLI_DEST} --config"
 echo ""
 echo "🛑 To uninstall later:"
 echo "   ${BINARY_CLI_DEST} --disable"
-if [ "${ENV}" == "prod" ]; then
+if [ "${MYENV}" == "prod" ]; then
     echo "   sudo rm ${BINARY_DAEMON_DEST} ${BINARY_CLI_DEST}"
 else
     echo "   rm ${BINARY_DAEMON_DEST} ${BINARY_CLI_DEST}"

@@ -19,7 +19,9 @@ swift build -c release
 
 BUILD_DIR=".build/release"
 BINARY_DAEMON="ClaudeAutoConfig"
-BINARY_SOURCE="${PWD}/${BUILD_DIR}/${BINARY_DAEMON}"
+BINARY_CLI="ClaudeAutoConfigCLI"
+BINARY_DAEMON_SOURCE="${PWD}/${BUILD_DIR}/${BINARY_DAEMON}"
+BINARY_CLI_SOURCE="${PWD}/${BUILD_DIR}/${BINARY_CLI}"
 PLIST_SOURCE="${PWD}/com.oemden.claudeautoconfig.plist"
 
 # Installation paths
@@ -27,22 +29,28 @@ ENV="dev" # Change to "prod" for production install
 BINARY_DEST_DIR_PROD="/usr/local/bin/"
 BINARY_DEST_DIR_DEV="/opt/dev/bin/"
 # Destination paths
-BINARY_DEST_PROD="${BINARY_DEST_DIR_PROD}/${BINARY_DAEMON}"
-BINARY_DEST_DEV="${BINARY_DEST_DIR_DEV}/${BINARY_DAEMON}"
+BINARY_DAEMON_DEST_PROD="${BINARY_DEST_DIR_PROD}/${BINARY_DAEMON}"
+BINARY_DAEMON_DEST_DEV="${BINARY_DEST_DIR_DEV}/${BINARY_DAEMON}"
+BINARY_CLI_DEST_PROD="${BINARY_DEST_DIR_PROD}/${BINARY_CLI}"
+BINARY_CLI_DEST_DEV="${BINARY_DEST_DIR_DEV}/${BINARY_CLI}"
 PLIST_DEST="${HOME}/Library/LaunchAgents/com.oemden.claudeautoconfig.plist"
 
 echo ""
 echo "📦 Installing files..."
-echo "📋 Installing binary to /usr/local/bin..."
 if [ "${ENV}" == "prod" ]; then
     echo "   ⚠️ Running in prod mode, sudo required"
 elif [ "${ENV}" == "dev" ]; then
     echo "   ⚠️ Running in dev mode, no sudo required"
 fi
 
-# Check if binary was built
-if [ ! -f "${BINARY_SOURCE}" ]; then
-    echo "❌ Binary not found: ${BINARY_SOURCE}"
+# Check if binaries were built
+if [ ! -f "${BINARY_DAEMON_SOURCE}" ]; then
+    echo "❌ Daemon binary not found: ${BINARY_DAEMON_SOURCE}"
+    exit 1
+fi
+
+if [ ! -f "${BINARY_CLI_SOURCE}" ]; then
+    echo "❌ CLI binary not found: ${BINARY_CLI_SOURCE}"
     exit 1
 fi
 
@@ -66,20 +74,31 @@ fi
 mkdir -p "$HOME/Library/LaunchAgents"
 mkdir -p "$HOME/Library/Logs"
 
-# Copy binary (requires sudo)
-echo "📋 Installing binary to ${BINARY_DEST_DIR}..."
+# Install daemon binary
+echo "📋 Installing daemon and cli binaries to ${BINARY_DEST_DIR}..."
 if [ "${ENV}" == "prod" ]; then
-    # echo "   ⚠️ Running in prod mode, sudo required"
-    # sudo mkdir -p "${BINARY_DEST_DIR_PROD}"
-    sudo cp "${BINARY_SOURCE}" "${BINARY_DEST}"
-    sudo chmod +x "${BINARY_DEST}"
+    BINARY_DAEMON_DEST="${BINARY_DAEMON_DEST_PROD}"
+    sudo cp "${BINARY_DAEMON_SOURCE}" "${BINARY_DAEMON_DEST}"
+    sudo chmod +x "${BINARY_DAEMON_DEST}"
 elif [ "${ENV}" == "dev" ]; then
-    # echo "   ⚠️ Running in dev mode, no sudo required"
-    # mkdir -p "${BINARY_DEST_DIR_DEV}"
-    cp "${BINARY_SOURCE}" "${BINARY_DEST}"
-    chmod +x "${BINARY_DEST}"
+    BINARY_DAEMON_DEST="${BINARY_DAEMON_DEST_DEV}"
+    cp "${BINARY_DAEMON_SOURCE}" "${BINARY_DAEMON_DEST}"
+    chmod +x "${BINARY_DAEMON_DEST}"
 fi
-echo "   ✅ Binary installed: ${BINARY_DEST}"
+echo "   ✅ Daemon binary installed: ${BINARY_DAEMON_DEST}"
+
+# Install CLI binary
+echo "📋 Installing CLI binary to ${BINARY_DEST_DIR}..."
+if [ "${ENV}" == "prod" ]; then
+    BINARY_CLI_DEST="${BINARY_CLI_DEST_PROD}"
+    sudo cp "${BINARY_CLI_SOURCE}" "${BINARY_CLI_DEST}"
+    sudo chmod +x "${BINARY_CLI_DEST}"
+elif [ "${ENV}" == "dev" ]; then
+    BINARY_CLI_DEST="${BINARY_CLI_DEST_DEV}"
+    cp "${BINARY_CLI_SOURCE}" "${BINARY_CLI_DEST}"
+    chmod +x "${BINARY_CLI_DEST}"
+fi
+echo "   ✅ CLI binary installed: ${BINARY_CLI_DEST}"
 
 # Copy LaunchAgent plist (user space)
 echo "unloading LaunchAgent if it exists..."
@@ -92,11 +111,11 @@ cp "${PLIST_SOURCE}" "${PLIST_DEST}"
 # Update binary path in plist based on environment
 echo "🔧 Updating plist binary path for ${ENV} environment..."
 if [ "${ENV}" == "prod" ]; then
-    sed -i '' "s|<string>/usr/local/bin/ClaudeAutoConfig</string>|<string>${BINARY_DEST}</string>|g" "${PLIST_DEST}"
-    echo "   ✅ Updated plist to use: ${BINARY_DEST}"
+    sed -i '' "s|<string>/usr/local/bin/ClaudeAutoConfig</string>|<string>${BINARY_DAEMON_DEST}</string>|g" "${PLIST_DEST}"
+    echo "   ✅ Updated plist to use: ${BINARY_DAEMON_DEST}"
 elif [ "${ENV}" == "dev" ]; then
-    sed -i '' "s|<string>/usr/local/bin/ClaudeAutoConfig</string>|<string>${BINARY_DEST}</string>|g" "${PLIST_DEST}"
-    echo "   ✅ Updated plist to use: ${BINARY_DEST}"
+    sed -i '' "s|<string>/usr/local/bin/ClaudeAutoConfig</string>|<string>${BINARY_DAEMON_DEST}</string>|g" "${PLIST_DEST}"
+    echo "   ✅ Updated plist to use: ${BINARY_DAEMON_DEST}"
 fi
 echo "   ✅ Plist installed: ${PLIST_DEST}"
 
@@ -104,6 +123,10 @@ echo "   ✅ Plist installed: ${PLIST_DEST}"
 echo "🚀 Enabling LaunchAgent..."
 launchctl load -w "${PLIST_DEST}"
 echo "   ✅ LaunchAgent enabled and started"
+
+# Check status
+echo "Check daemon status:"
+${BINARY_CLI_DEST} --status
 
 echo ""
 echo "✅ Installation complete!"
@@ -116,9 +139,17 @@ echo "2. Launch TextEdit to trigger the daemon:"
 echo "   open -a TextEdit"
 echo ""
 echo "3. Check daemon status:"
-echo "   ${BINARY_DEST} --status"
+echo "   ${BINARY_CLI_DEST} --status"
+echo ""
+echo "4. Manage secrets:"
+echo "   ${BINARY_CLI_DEST} --add API_KEY=your_key_here"
+echo "   ${BINARY_CLI_DEST} --config"
 echo ""
 echo "🛑 To uninstall later:"
-echo "   ${BINARY_DEST} --disable"
-echo "   sudo rm ${BINARY_DEST}"
+echo "   ${BINARY_CLI_DEST} --disable"
+if [ "${ENV}" == "prod" ]; then
+    echo "   sudo rm ${BINARY_DAEMON_DEST} ${BINARY_CLI_DEST}"
+else
+    echo "   rm ${BINARY_DAEMON_DEST} ${BINARY_CLI_DEST}"
+fi
 echo "   rm ${PLIST_DEST}"

@@ -12,11 +12,19 @@ let package = Package(
         .executable(
             name: "ClaudeAutoConfig",
             targets: ["ClaudeAutoConfig"]
+        ),
+        .executable(
+            name: "ClaudeAutoConfigCLI",
+            targets: ["ClaudeAutoConfigCLI"]
         )
     ],
     targets: [
         .executableTarget(
             name: "ClaudeAutoConfig",
+            dependencies: []
+        ),
+        .executableTarget(
+            name: "ClaudeAutoConfigCLI",
             dependencies: []
         )
     ]

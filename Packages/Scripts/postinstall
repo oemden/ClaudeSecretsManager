@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ###############################################################################
-# Claude Secrets Manager - Package Post-Installation Script - Version "0.3.1"
+# Claude Secrets Manager - Package Post-Installation Script - Version "0.4.0"
 # Follows standard macOS package installer patterns
 # Based on XCreds postinstall.sh structure
 ###############################################################################
@@ -200,7 +200,7 @@ else
     sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_file "~/.claudesecrets/.claude_secrets"
 fi
 
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_mechanism "file"
+sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_mechanism "keychain"
 sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets shareClaudeDesktop_config_withClaudeCode -bool true
 sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets target_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
 sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
@@ -240,7 +240,28 @@ echo "   claudesecrets-cli --status   # Check daemon status"
 echo "   claudesecrets-cli --enable   # Start the daemon"
 echo ""
 
+# Import keychain secrets if they were exported during pre-install
+echo ""
+echo "🔐 Checking for keychain secrets to import..."
+
+if [[ -f "/tmp/claudesecrets_migration_path" ]]; then
+    echo "   🔑 Migration data found, attempting import..."
+    
+    # Import keychain secrets with new binary ownership
+    if /usr/local/bin/claudesecrets-cli --upgrade --import; then
+        echo "   ✅ Keychain secrets imported successfully"
+        echo "   🎉 Seamless keychain migration completed!"
+    else
+        echo "   ⚠️  Failed to import keychain secrets"
+        echo "   💡 You may need to manually migrate keychain entries:"
+        echo "      CLAUDE_FORCE_UPGRADE=1 claudesecrets-cli --upgrade"
+    fi
+else
+    echo "   ℹ️  No migration data found - no keychain import needed"
+fi
+
 # Display Status
+echo ""
 /usr/local/bin/claudesecrets-cli --status
 
 # Clean up any remaining temporary files

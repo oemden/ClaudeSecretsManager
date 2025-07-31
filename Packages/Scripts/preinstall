@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ###############################################################################
-# Claude Secrets Manager - Package Pre-Installation Script - Version "0.3.1"
+# Claude Secrets Manager - Package Pre-Installation Script - Version "0.4.0"
 # Performs essential checks and backup operations before installation
 # Simplified version following XCreds patterns
 ###############################################################################
@@ -114,6 +114,31 @@ if [[ -f "$CONFIG_FILE" ]]; then
     
     echo "   ✅ Backup created: $BACKUP_FILE"
     echo "   🛡️  Existing Claude config will be preserved"
+fi
+
+# Export keychain secrets before stopping daemon (if CLI exists and keychain has secrets)
+echo ""
+echo "🔐 Checking for keychain secrets to export..."
+
+if [[ -f "/usr/local/bin/claudesecrets-cli" ]]; then
+    # Check if we're using keychain mechanism
+    SECRETS_MECHANISM=$(sudo -u "$CONSOLE_USER" defaults read com.oemden.claudesecrets secrets_mechanism 2>/dev/null || echo "file")
+    
+    if [[ "$SECRETS_MECHANISM" == "keychain" ]]; then
+        echo "   🔑 Keychain mechanism detected, attempting export..."
+        
+        # Export keychain secrets for migration
+        if sudo -u "$CONSOLE_USER" /usr/local/bin/claudesecrets-cli --upgrade --export 2>/dev/null; then
+            echo "   ✅ Keychain secrets exported for migration"
+        else
+            echo "   ⚠️  Failed to export keychain secrets (may be empty or inaccessible)"
+            echo "   💡 Installation will continue - secrets may need manual migration"
+        fi
+    else
+        echo "   📄 File mechanism detected, no keychain export needed"
+    fi
+else
+    echo "   ℹ️  Claude Secrets CLI not found, no export needed"
 fi
 
 # Stop any running claudesecrets daemon before installation

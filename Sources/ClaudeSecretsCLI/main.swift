@@ -3,6 +3,9 @@
 import Foundation
 import SharedConstants
 import KeychainManager
+#if canImport(CommonCrypto)
+import CommonCrypto
+#endif
 
 // MARK: - Shared Components (will be moved to shared module later)
 
@@ -33,6 +36,10 @@ struct Preferences {
     
     static var secretsMechanism: String {
         return customDefaults.string(forKey: "secrets_mechanism") ?? "file"
+    }
+    
+    static var logLevel: Int {
+        return customDefaults.integer(forKey: "log_level") // Defaults to 0 (minimal) if not set
     }
     
     static var manageClaudeDesktopConfig: Bool {
@@ -109,6 +116,51 @@ struct Preferences {
         }
         
         return true
+    }
+}
+
+// MARK: - Logging System
+enum LogLevel: Int, CaseIterable {
+    case minimal = 0    // Only essential results
+    case normal = 1     // Default operational info  
+    case debug = 2      // Full verbose debugging
+    
+    var description: String {
+        switch self {
+        case .minimal: return "minimal"
+        case .normal: return "normal" 
+        case .debug: return "debug"
+        }
+    }
+}
+
+struct Logger {
+    /// Log message if current log level allows it
+    static func log(_ message: String, level: LogLevel = .normal) {
+        let currentLevel = LogLevel(rawValue: Preferences.logLevel) ?? .minimal
+        if level.rawValue <= currentLevel.rawValue {
+            print(message)
+        }
+    }
+    
+    /// Always log regardless of level (for critical messages)
+    static func always(_ message: String) {
+        print(message)
+    }
+    
+    /// Log at minimal level (essential results only)
+    static func minimal(_ message: String) {
+        log(message, level: .minimal)
+    }
+    
+    /// Log at normal level (default operational info)
+    static func normal(_ message: String) {
+        log(message, level: .normal)
+    }
+    
+    /// Log at debug level (verbose debugging)
+    static func debug(_ message: String) {
+        log(message, level: .debug)
     }
 }
 
@@ -283,6 +335,299 @@ extension String {
     }
 }
 
+// MARK: - Encryption Manager for Secure Export/Import
+struct EncryptionManager {
+    
+    static let saltLength = 32
+    static let ivLength = 16
+    static let migrationKeyAccount = "claudesecrets_migration_key"
+    
+    /// Encrypt secrets dictionary to data with random key and IV
+    /// File format: [iv:16][encrypted_data]
+    static func encrypt(secrets: [String: String]) throws -> Data {
+        // Convert secrets to JSON
+        let jsonData = try JSONSerialization.data(withJSONObject: secrets, options: [])
+        
+        // Generate random encryption key and store in keychain
+        let key = try generateAndStoreMigrationKey()
+        
+        // Generate random IV
+        let iv = generateRandomBytes(count: ivLength)
+        
+        #if canImport(CommonCrypto)
+        // Encrypt using AES-256-CBC (more widely supported than GCM)
+        let bufferSize = jsonData.count + kCCBlockSizeAES128
+        var encryptedData = Data(count: bufferSize)
+        var encryptedLength = 0
+        
+        let status = encryptedData.withUnsafeMutableBytes { encryptedPtr in
+            jsonData.withUnsafeBytes { dataPtr in
+                key.withUnsafeBytes { keyPtr in
+                    iv.withUnsafeBytes { ivPtr in
+                        CCCrypt(
+                            CCOperation(kCCEncrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(kCCOptionPKCS7Padding),
+                            keyPtr.baseAddress, key.count,
+                            ivPtr.baseAddress,
+                            dataPtr.baseAddress, jsonData.count,
+                            encryptedPtr.baseAddress, bufferSize,
+                            &encryptedLength
+                        )
+                    }
+                }
+            }
+        }
+        
+        guard status == kCCSuccess else {
+            throw EncryptionError.encryptionFailed
+        }
+        
+        // Combine: iv + encrypted_data (no salt needed, key stored in keychain)
+        var result = Data()
+        result.append(iv)
+        result.append(encryptedData.prefix(encryptedLength))
+        
+        return result
+        #else
+        throw EncryptionError.encryptionNotSupported
+        #endif
+    }
+    
+    /// Decrypt data back to secrets dictionary
+    static func decrypt(data: Data) throws -> [String: String] {
+        guard data.count >= ivLength else {
+            throw EncryptionError.invalidDataFormat
+        }
+        
+        // Extract components
+        let iv = data.subdata(in: 0..<ivLength)
+        let encryptedData = data.subdata(in: ivLength..<data.count)
+        
+        // Retrieve key from keychain and delete it
+        let key = try retrieveAndDeleteMigrationKey()
+        
+        #if canImport(CommonCrypto)
+        // Decrypt using AES-256-CBC
+        let bufferSize = encryptedData.count
+        var decryptedData = Data(count: bufferSize)
+        var decryptedLength = 0
+        
+        let status = decryptedData.withUnsafeMutableBytes { decryptedPtr in
+            encryptedData.withUnsafeBytes { encryptedPtr in
+                key.withUnsafeBytes { keyPtr in
+                    iv.withUnsafeBytes { ivPtr in
+                        CCCrypt(
+                            CCOperation(kCCDecrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(kCCOptionPKCS7Padding),
+                            keyPtr.baseAddress, key.count,
+                            ivPtr.baseAddress,
+                            encryptedPtr.baseAddress, encryptedData.count,
+                            decryptedPtr.baseAddress, bufferSize,
+                            &decryptedLength
+                        )
+                    }
+                }
+            }
+        }
+        
+        guard status == kCCSuccess else {
+            throw EncryptionError.decryptionFailed
+        }
+        
+        // Parse JSON back to dictionary
+        let jsonData = decryptedData.prefix(decryptedLength)
+        let secrets = try JSONSerialization.jsonObject(with: jsonData, options: [])
+        
+        guard let secretsDict = secrets as? [String: String] else {
+            throw EncryptionError.invalidDataFormat
+        }
+        
+        return secretsDict
+        #else
+        throw EncryptionError.encryptionNotSupported
+        #endif
+    }
+    
+    /// Generate cryptographically secure random bytes
+    private static func generateRandomBytes(count: Int) -> Data {
+        var bytes = Data(count: count)
+        let status = bytes.withUnsafeMutableBytes { ptr in
+            SecRandomCopyBytes(kSecRandomDefault, count, ptr.baseAddress!)
+        }
+        
+        if status != errSecSuccess {
+            // Fallback to less secure random generation
+            for i in 0..<count {
+                bytes[i] = UInt8.random(in: 0...255)
+            }
+        }
+        
+        return bytes
+    }
+    
+    /// Generate random encryption key using openssl and store in keychain
+    private static func generateAndStoreMigrationKey() throws -> Data {
+        // Use openssl to generate cryptographically secure random key
+        let process = Process()
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
+        process.arguments = ["rand", "-hex", "32"] // 32 bytes = 256 bits for AES-256
+        
+        try process.run()
+        process.waitUntilExit()
+        
+        guard process.terminationStatus == 0 else {
+            throw EncryptionError.keyGenerationFailed
+        }
+        
+        let keyData = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let keyHex = String(data: keyData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              keyHex.count == 64 else { // 32 bytes = 64 hex characters
+            throw EncryptionError.keyGenerationFailed
+        }
+        
+        // Store hex key in keychain using separate service for migration keys
+        try storeMigrationKeyInKeychain(account: migrationKeyAccount, value: keyHex)
+        
+        // Convert hex string to Data for encryption
+        guard let keyData = Data(hexString: keyHex) else {
+            throw EncryptionError.keyGenerationFailed
+        }
+        
+        return keyData
+    }
+    
+    /// Retrieve migration key from keychain and delete it immediately
+    private static func retrieveAndDeleteMigrationKey() throws -> Data {
+        // Retrieve hex key from keychain using separate service
+        let keyHex = try retrieveMigrationKeyFromKeychain(account: migrationKeyAccount)
+        
+        // Delete the key immediately (cleanup)
+        try deleteMigrationKeyFromKeychain(account: migrationKeyAccount)
+        
+        // Convert hex string back to Data
+        guard let keyData = Data(hexString: keyHex) else {
+            throw EncryptionError.invalidDataFormat
+        }
+        
+        return keyData
+    }
+    
+    /// Store migration key in keychain using separate service identifier
+    private static func storeMigrationKeyInKeychain(account: String, value: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "claudesecretsupgradekey", // Separate service
+            kSecAttrAccount as String: account,
+            kSecValueData as String: value.data(using: .utf8)!,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked,
+            kSecAttrComment as String: "Migration key for package upgrade - auto-deleted after import"
+        ]
+        
+        let status = SecItemAdd(query as CFDictionary, nil)
+        
+        guard status == errSecSuccess else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+    
+    /// Retrieve migration key from keychain using separate service identifier
+    private static func retrieveMigrationKeyFromKeychain(account: String) throws -> String {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "claudesecretsupgradekey", // Separate service
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        guard status == errSecSuccess else {
+            if status == errSecItemNotFound {
+                throw KeychainError.itemNotFound
+            }
+            throw KeychainError.unexpectedStatus(status)
+        }
+        
+        guard let data = result as? Data,
+              let string = String(data: data, encoding: .utf8) else {
+            throw KeychainError.unableToConvertToString
+        }
+        
+        return string
+    }
+    
+    /// Delete migration key from keychain using separate service identifier
+    private static func deleteMigrationKeyFromKeychain(account: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "claudesecretsupgradekey", // Separate service
+            kSecAttrAccount as String: account
+        ]
+        
+        let status = SecItemDelete(query as CFDictionary)
+        
+        guard status == errSecSuccess else {
+            if status == errSecItemNotFound {
+                throw KeychainError.itemNotFound
+            }
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+}
+
+enum EncryptionError: LocalizedError {
+    case encryptionFailed
+    case decryptionFailed
+    case keyGenerationFailed
+    case encryptionNotSupported
+    case invalidDataFormat
+    
+    var errorDescription: String? {
+        switch self {
+        case .encryptionFailed:
+            return "Failed to encrypt data"
+        case .decryptionFailed:
+            return "Failed to decrypt data"
+        case .keyGenerationFailed:
+            return "Failed to generate encryption key"
+        case .encryptionNotSupported:
+            return "Encryption not supported on this platform"
+        case .invalidDataFormat:
+            return "Invalid encrypted data format"
+        }
+    }
+}
+
+// MARK: - Data Hex Extension
+extension Data {
+    /// Initialize Data from hex string
+    init?(hexString: String) {
+        let hex = hexString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard hex.count % 2 == 0 else { return nil }
+        
+        var data = Data()
+        var index = hex.startIndex
+        
+        while index < hex.endIndex {
+            let nextIndex = hex.index(index, offsetBy: 2)
+            let byteString = hex[index..<nextIndex]
+            
+            guard let byte = UInt8(byteString, radix: 16) else { return nil }
+            data.append(byte)
+            
+            index = nextIndex
+        }
+        
+        self = data
+    }
+}
+
 // MARK: - CLI Command Processing
 struct CLICommands {
     static func showHelp() {
@@ -301,6 +646,7 @@ struct CLICommands {
             -l, --list-secrets [file|keychain] List all stored secrets
             -V, --voice [on|off]          Enable/disable voice notifications
             -n, --notifications [on|off]  Enable/disable macOS notifications
+            -L, --log-level [level]       Set logging verbosity: minimal|normal|debug
             -j COMMENT                     Specify comment string for keychain entries
         
         COMMANDS:
@@ -322,9 +668,11 @@ struct CLICommands {
             -R, --restore                 Restore original Claude config and disable daemon
             -u, --upgrade                 Transfer keychain ownership to current binary
                                          (use after installing new build/package)
-            --migrate [file-to-keychain] [--emptysecretfile]  
+            --migrate [file-to-keychain] [--emptysecretfile] | --file <path>
                                          Migrate secrets between storage mechanisms
+                                         file-to-keychain: Migrate from default secrets file to keychain
                                          --emptysecretfile: Empty source file after migration
+                                         --file <path>: Bulk import secrets from specified file to keychain
             --noclaudesecrets            Emergency disable: stop daemon, restore config
             --wipesecrets                Delete ALL secrets from both file and keychain
         
@@ -341,6 +689,8 @@ struct CLICommands {
             claudeautoconfig --upgrade
             claudeautoconfig --migrate file-to-keychain
             claudeautoconfig --migrate file-to-keychain --emptysecretfile
+            claudeautoconfig --migrate --file /path/to/secrets.env
+            claudeautoconfig --log-level minimal
             claudeautoconfig --noclaudesecrets
             claudeautoconfig --wipesecrets
         
@@ -425,6 +775,16 @@ struct CLICommands {
                     i += 1
                 } else {
                     print("❌ --voice requires a value: on|off")
+                    return true
+                }
+                
+            case "-L", "--log-level":
+                if i + 1 < args.count {
+                    let value = args[i + 1]
+                    setLogLevel(value: value)
+                    i += 1
+                } else {
+                    print("❌ --log-level requires a value: minimal|normal|debug")
                     return true
                 }
                 
@@ -561,12 +921,22 @@ struct CLICommands {
                         let emptysecretfile = (i + 2 < args.count && args[i + 2] == "--emptysecretfile")
                         migrateSecretsFileToKeychain(emptysecretfile: emptysecretfile)
                         i += emptysecretfile ? 2 : 1
+                    } else if migrationType == "--file" {
+                        // Bulk import from specific file
+                        if i + 2 < args.count {
+                            let filePath = args[i + 2]
+                            bulkImportFromFile(filePath: filePath)
+                            i += 2
+                        } else {
+                            print("❌ --migrate --file requires a file path")
+                            return true
+                        }
                     } else {
-                        print("❌ --migrate requires: file-to-keychain [--emptysecretfile]")
+                        print("❌ --migrate requires: file-to-keychain [--emptysecretfile] | --file <path>")
                         return true
                     }
                 } else {
-                    print("❌ --migrate requires migration type: file-to-keychain [--emptysecretfile]")
+                    print("❌ --migrate requires migration type: file-to-keychain [--emptysecretfile] | --file <path>")
                     return true
                 }
                 return true
@@ -580,7 +950,43 @@ struct CLICommands {
                 return true
                 
             case "-u", "--upgrade":
-                upgradeKeychainOwnership()
+                // Check for --export or --import flags
+                if i + 1 < args.count {
+                    let nextArg = args[i + 1]
+                    if nextArg == "--export" {
+                        exportSecretsForUpgrade()
+                        i += 1
+                        return true
+                    } else if nextArg == "--import" {
+                        importSecretsFromUpgrade()
+                        i += 1
+                        return true
+                    }
+                }
+                
+                // Block standalone --upgrade calls to encourage proper migration workflow
+                print("❌ --upgrade requires either --export or --import flag")
+                print("")
+                print("💡 For package installation migration:")
+                print("   --upgrade --export   # Export secrets before installation")
+                print("   --upgrade --import   # Import secrets after installation")
+                print("")
+                print("💡 For manual keychain ownership transfer:")
+                print("   Use claudesecrets-cli directly without --upgrade")
+                print("   or use: --migrate file-to-keychain")
+                print("")
+                print("🔧 For emergency manual upgrade (may prompt for keychain access):")
+                print("   CLAUDE_FORCE_UPGRADE=1 claudesecrets-cli --upgrade")
+                
+                // Allow override with environment variable for emergency manual upgrade
+                if ProcessInfo.processInfo.environment["CLAUDE_FORCE_UPGRADE"] == "1" {
+                    print("")
+                    print("⚠️  Forcing manual upgrade due to CLAUDE_FORCE_UPGRADE=1")
+                    upgradeKeychainOwnership()
+                } else {
+                    exit(1)
+                }
+                
                 return true
                 
             case "--check-upgrade-needed":
@@ -647,6 +1053,40 @@ struct CLICommands {
         let defaults = UserDefaults(suiteName: SharedConstants.suiteName) ?? UserDefaults.standard
         defaults.set(enabled, forKey: "macos_notifications")
         print("📱 macOS notifications: \(enabled ? "ENABLED" : "DISABLED")")
+    }
+    
+    static func setLogLevel(value: String) {
+        let defaults = UserDefaults(suiteName: SharedConstants.suiteName) ?? UserDefaults.standard
+        
+        let logLevel: Int
+        switch value.lowercased() {
+        case "minimal", "min", "0":
+            logLevel = 0
+        case "normal", "norm", "1":
+            logLevel = 1
+        case "debug", "verbose", "2":
+            logLevel = 2
+        default:
+            print("❌ Invalid log level: \(value)")
+            print("   Valid options: minimal, normal, debug")
+            return
+        }
+        
+        defaults.set(logLevel, forKey: "log_level")
+        let levelName = LogLevel(rawValue: logLevel)?.description ?? "unknown"
+        print("📊 Log level set to: \(levelName.uppercased())")
+        
+        // Show what each level includes
+        switch logLevel {
+        case 0:
+            print("   Shows: Essential results only")
+        case 1:
+            print("   Shows: Operational info + progress")
+        case 2:
+            print("   Shows: Full debugging + internal details")
+        default:
+            break
+        }
     }
     
     static func addSecrets(_ secrets: [String: String], mechanism: String, comment: String? = nil) {
@@ -1231,6 +1671,94 @@ struct CLICommands {
         }
     }
     
+    /// Bulk import secrets from specified file to keychain
+    static func bulkImportFromFile(filePath: String) {
+        Logger.minimal("📦 Bulk Import: Loading secrets from file")
+        Logger.normal(String(repeating: "=", count: 50))
+        Logger.normal("📁 Source file: \(filePath)")
+        
+        do {
+            // Validate file exists
+            let expandedPath = filePath.expandingTildeInPath
+            guard FileManager.default.fileExists(atPath: expandedPath) else {
+                Logger.always("❌ File not found: \(expandedPath)")
+                exit(1)
+            }
+            
+            // Parse secrets from the specified file
+            let secrets = try SecretsParser.parseSecretsFile(at: filePath)
+            
+            if secrets.isEmpty {
+                Logger.always("ℹ️  No valid secrets found in file")
+                Logger.normal("   Expected format: KEY=VALUE or export KEY=VALUE")
+                return
+            }
+            
+            Logger.normal("🔍 Found \(secrets.count) secret(s) in file:")
+            for key in secrets.keys.sorted() {
+                Logger.normal("   • \(key)")
+            }
+            
+            Logger.minimal("🔑 Importing to keychain...")
+            
+            var successCount = 0
+            var failCount = 0
+            var updatedCount = 0
+            
+            for (key, value) in secrets {
+                do {
+                    if KeychainManager.exists(account: key) {
+                        try KeychainManager.store(account: key, value: value)
+                        Logger.normal("  🔄 Updated: \(key)")
+                        updatedCount += 1
+                    } else {
+                        try KeychainManager.store(account: key, value: value)
+                        Logger.normal("  ✅ Added: \(key)")
+                        successCount += 1
+                    }
+                } catch {
+                    Logger.always("  ❌ Failed to import \(key): \(error.localizedDescription)")
+                    failCount += 1
+                }
+            }
+            
+            // Summary
+            Logger.minimal("📊 Bulk Import Results:")
+            if successCount > 0 {
+                Logger.minimal("   ✅ New secrets added: \(successCount)")
+            }
+            if updatedCount > 0 {
+                Logger.minimal("   🔄 Existing secrets updated: \(updatedCount)")
+            }
+            if failCount > 0 {
+                Logger.minimal("   ❌ Failed imports: \(failCount)")
+            }
+            
+            let totalSuccess = successCount + updatedCount
+            if totalSuccess == secrets.count {
+                Logger.minimal("🎉 All secrets successfully imported to keychain!")
+                Logger.normal("   You can now use keychain storage mechanism")
+                Logger.normal("   Run: defaults write com.oemden.claudesecrets secrets_mechanism \"keychain\"")
+            } else if totalSuccess > 0 {
+                Logger.minimal("⚠️  Partial import completed (\(totalSuccess)/\(secrets.count))")
+                Logger.normal("   Some secrets may need manual attention")
+            } else {
+                Logger.always("❌ Bulk import failed for all secrets")
+                Logger.normal("   Check file format and keychain access permissions")
+                exit(1)
+            }
+            
+        } catch {
+            Logger.always("❌ Failed to process secrets file: \(error.localizedDescription)")
+            Logger.normal("💡 Expected file format:")
+            Logger.normal("   KEY1=value1")
+            Logger.normal("   export KEY2=value2")
+            Logger.normal("   # Comments are supported")
+            Logger.normal("   KEY3=complex_value_with_special_chars")
+            exit(1)
+        }
+    }
+    
     /// Emergency disable function - stops daemon, disables LaunchAgent, restores config
     static func emergencyDisableClaudeSecrets() {
         print("🚨 Emergency Recovery: Disabling Claude Secrets Manager")
@@ -1515,6 +2043,156 @@ struct CLICommands {
         }
     }
     
+    /// Export keychain secrets to encrypted tmp file for package installation
+    static func exportSecretsForUpgrade() {
+        print("🔐 Exporting keychain secrets for package upgrade...")
+        
+        do {
+            // 1. Get all existing keychain entries
+            let secrets = try KeychainManager.listAll()
+            print("🔍 Found \(secrets.count) keychain entries to export")
+            
+            if secrets.isEmpty {
+                print("ℹ️  No keychain entries found - nothing to export")
+                return
+            }
+            
+            // 2. Create temporary directory using mktemp
+            let process = Process()
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/mktemp")
+            process.arguments = ["-d", "-t", "claudesecrets_migration"]
+            
+            try process.run()
+            process.waitUntilExit()
+            
+            guard process.terminationStatus == 0 else {
+                print("❌ Failed to create temporary directory")
+                exit(1)
+            }
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let tmpDir = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                print("❌ Failed to read temporary directory path")
+                exit(1)
+            }
+            
+            // 3. Encrypt secrets
+            let encryptedData = try EncryptionManager.encrypt(secrets: secrets)
+            
+            // 4. Write to secure tmp file
+            let tmpFile = "\(tmpDir)/claudesecrets_export.enc"
+            try encryptedData.write(to: URL(fileURLWithPath: tmpFile))
+            
+            // Set restrictive permissions (600)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: tmpFile
+            )
+            
+            // 5. Store tmp directory path for post-install script
+            let pathFile = "/tmp/claudesecrets_migration_path"
+            try tmpDir.write(toFile: pathFile, atomically: true, encoding: .utf8)
+            
+            print("✅ Exported \(secrets.count) secrets to: \(tmpFile)")
+            print("📁 Migration path stored: \(pathFile)")
+            
+            // 6. Log obfuscated secret names (for debugging)
+            let secretNames = secrets.keys.sorted()
+            for name in secretNames {
+                print("  📦 Exported: \(name)")
+            }
+            
+        } catch {
+            print("❌ Failed to export secrets: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    
+    /// Import keychain secrets from encrypted tmp file after package installation
+    static func importSecretsFromUpgrade() {
+        print("🔐 Importing keychain secrets after package upgrade...")
+        
+        do {
+            // 1. Read tmp directory path
+            let pathFile = "/tmp/claudesecrets_migration_path"
+            guard FileManager.default.fileExists(atPath: pathFile) else {
+                print("ℹ️  No migration path found - nothing to import")
+                return
+            }
+            
+            let tmpDir = try String(contentsOfFile: pathFile, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // 2. Read encrypted file
+            let tmpFile = "\(tmpDir)/claudesecrets_export.enc"
+            guard FileManager.default.fileExists(atPath: tmpFile) else {
+                print("ℹ️  No export file found - nothing to import")
+                // Clean up path file
+                try? FileManager.default.removeItem(atPath: pathFile)
+                return
+            }
+            
+            let encryptedData = try Data(contentsOf: URL(fileURLWithPath: tmpFile))
+            print("🔍 Found encrypted export file: \(tmpFile)")
+            
+            // 3. Decrypt secrets
+            let secrets = try EncryptionManager.decrypt(data: encryptedData)
+            print("🔓 Decrypted \(secrets.count) secrets")
+            
+            // 4. Import secrets with new binary ownership
+            var successCount = 0
+            var failureCount = 0
+            
+            for (key, value) in secrets {
+                do {
+                    // Store with new binary (current binary becomes owner)
+                    try KeychainManager.store(account: key, value: value)
+                    let obfuscatedValue = String(repeating: "*", count: min(value.count, 8))
+                    print("  ✅ Imported: \(key) = \(obfuscatedValue)...")
+                    successCount += 1
+                } catch {
+                    print("  ❌ Failed to import \(key): \(error.localizedDescription)")
+                    failureCount += 1
+                }
+            }
+            
+            // 5. Clean up tmp files
+            do {
+                try FileManager.default.removeItem(atPath: tmpDir)
+                try FileManager.default.removeItem(atPath: pathFile)
+                print("🧹 Temporary files cleaned up")
+            } catch {
+                print("⚠️  Failed to clean up tmp files: \(error.localizedDescription)")
+                print("   Manual cleanup: rm -rf \(tmpDir) \(pathFile)")
+            }
+            
+            // 6. Report results
+            print("\n📊 Import Summary:")
+            print("   ✅ Successfully imported: \(successCount)")
+            if failureCount > 0 {
+                print("   ❌ Failed to import: \(failureCount)")
+            }
+            
+            if successCount == secrets.count {
+                print("\n🎉 All keychain entries successfully migrated to new binary!")
+                print("   Claude Desktop will now work without keychain prompts")
+            } else if successCount > 0 {
+                print("\n⚠️  Partial import completed")
+                print("   Some entries may still require manual attention")
+            } else {
+                print("\n❌ Import failed for all entries")
+                print("   Check keychain access permissions")
+                exit(1)
+            }
+            
+        } catch {
+            print("❌ Failed to import secrets: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    
     /// Transfer keychain ownership to current binary (for new builds/packages)
     static func upgradeKeychainOwnership() {
         print("🔄 Upgrading keychain ownership to current binary...")
@@ -1580,26 +2258,20 @@ struct CLICommands {
     }
     
     /// Check if keychain entries need upgrade (used by daemon)
-    /// Exits with code 0 if no upgrade needed, 1 if upgrade needed, >1 for errors
+    /// Exits with code 0 if no upgrade needed, 1 if upgrade needed
     static func checkUpgradeNeeded() {
-        do {
-            // Get list of entries that need upgrade
-            let entriesNeedingUpgrade = KeychainManager.getEntriesNeedingUpgrade()
-            
-            if entriesNeedingUpgrade.isEmpty {
-                // No upgrade needed - exit with code 0
-                print("✅ All keychain entries are current")
-                exit(0)
-            } else {
-                // Upgrade needed - exit with code 1
-                print("🔄 Found \(entriesNeedingUpgrade.count) entries needing upgrade")
-                print("   Entries: \(entriesNeedingUpgrade.joined(separator: ", "))")
-                exit(1)
-            }
-        } catch {
-            // Error checking - exit with code 2
-            print("❌ Failed to check keychain status: \(error.localizedDescription)")
-            exit(2)
+        // Get list of entries that need upgrade
+        let entriesNeedingUpgrade = KeychainManager.getEntriesNeedingUpgrade()
+        
+        if entriesNeedingUpgrade.isEmpty {
+            // No upgrade needed - exit with code 0
+            print("✅ All keychain entries are current")
+            exit(0)
+        } else {
+            // Upgrade needed - exit with code 1
+            print("🔄 Found \(entriesNeedingUpgrade.count) entries needing upgrade")
+            print("   Entries: \(entriesNeedingUpgrade.joined(separator: ", "))")
+            exit(1)
         }
     }
 }

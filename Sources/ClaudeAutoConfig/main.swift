@@ -142,7 +142,7 @@ struct Preferences {
         "macos_notifications": true,
         "manage_ClaudeDesktop_config": true,
         "manage_ClaudeCode_config": true,
-        "shareClaudeDesktop_config_withClaudeCode": false,
+        "shareClaudeDesktop_config_withClaudeCode": true,
         "always_secure_config": true,
         "first_run_done": true
     ]
@@ -419,7 +419,7 @@ SECRET_TOKEN=your_secret_token_here
             "manage_ClaudeDesktop_config": true,
             "manage_ClaudeCode_config": false,
             "always_secure_config": true,
-            "shareClaudeDesktop_config_withClaudeCode": false,
+            "shareClaudeDesktop_config_withClaudeCode": true,
             "process_monitoring_interval": 1.0,
             
             // App and binary configuration
@@ -1214,6 +1214,16 @@ class AppMonitor {
         Logger.shared.info("🔄 Creating config for \(appType) process...")
         Logger.shared.info("📄 Template path: \(templatePath.expandingTildeInPath)")
         Logger.shared.info("💾 Output path: \(outputPath.expandingTildeInPath)")
+        
+        // Validate and create missing files (template, secrets) before processing
+        if !Preferences.validateAndCreateFiles() {
+            Logger.shared.error("❌ Failed to validate and create required files for \(appType)")
+            showNotification(
+                title: "Config Creation Failed", 
+                body: "Failed to create required template or secrets files"
+            )
+            return
+        }
         
         do {
             try loadSecretsAndProcessTemplate(templatePath: templatePath, outputPath: outputPath)

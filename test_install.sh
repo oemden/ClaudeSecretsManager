@@ -56,35 +56,48 @@ fi
 echo "📁 Creating directories..."
 if [ "${ENV}" == "prod" ]; then
     BINARY_DEST="${BINARY_DEST_PROD}"
-    sudo mkdir -p ${BINARY_DEST_DIR_PROD}
-else
+    BINARY_DEST_DIR="${BINARY_DEST_DIR_PROD}"
+    sudo mkdir -p ${BINARY_DEST_DIR}
+elif [ "${ENV}" == "dev" ]; then
     BINARY_DEST="${BINARY_DEST_DEV}"
-    mkdir -p ${BINARY_DEST_DIR_DEV}
+    BINARY_DEST_DIR=${BINARY_DEST_DIR_DEV}
+    mkdir -p ${BINARY_DEST_DIR}
 fi
 mkdir -p "$HOME/Library/LaunchAgents"
 mkdir -p "$HOME/Library/Logs"
 
 # Copy binary (requires sudo)
-echo "📋 Installing binary to /usr/local/bin..."
+echo "📋 Installing binary to ${BINARY_DEST_DIR}..."
 if [ "${ENV}" == "prod" ]; then
     # echo "   ⚠️ Running in prod mode, sudo required"
-    sudo mkdir -p "${BINARY_DEST_DIR_PROD}"
+    # sudo mkdir -p "${BINARY_DEST_DIR_PROD}"
     sudo cp "${BINARY_SOURCE}" "${BINARY_DEST}"
     sudo chmod +x "${BINARY_DEST}"
 elif [ "${ENV}" == "dev" ]; then
     # echo "   ⚠️ Running in dev mode, no sudo required"
-    mkdir -p "${BINARY_DEST_DIR_DEV}"
+    # mkdir -p "${BINARY_DEST_DIR_DEV}"
     cp "${BINARY_SOURCE}" "${BINARY_DEST}"
     chmod +x "${BINARY_DEST}"
 fi
 echo "   ✅ Binary installed: ${BINARY_DEST}"
 
 # Copy LaunchAgent plist (user space)
-echo "unlkoading LaunchAgent if it exists..."
+echo "unloading LaunchAgent if it exists..."
 launchctl unload -w "${PLIST_DEST}" 2>/dev/null || true
 rm -f "${PLIST_DEST}"
+sleep 5
 echo "📋 Installing LaunchAgent plist..."
 cp "${PLIST_SOURCE}" "${PLIST_DEST}"
+
+# Update binary path in plist based on environment
+echo "🔧 Updating plist binary path for ${ENV} environment..."
+if [ "${ENV}" == "prod" ]; then
+    sed -i '' "s|<string>/usr/local/bin/ClaudeAutoConfig</string>|<string>${BINARY_DEST}</string>|g" "${PLIST_DEST}"
+    echo "   ✅ Updated plist to use: ${BINARY_DEST}"
+elif [ "${ENV}" == "dev" ]; then
+    sed -i '' "s|<string>/usr/local/bin/ClaudeAutoConfig</string>|<string>${BINARY_DEST}</string>|g" "${PLIST_DEST}"
+    echo "   ✅ Updated plist to use: ${BINARY_DEST}"
+fi
 echo "   ✅ Plist installed: ${PLIST_DEST}"
 
 # Enable the daemon

@@ -109,7 +109,7 @@ struct TemplateProcessor {
         let backupPath = configURL.deletingLastPathComponent()
             .appendingPathComponent("claudeAutoConfig.firstrun.claude_desktop_config.json.backup")
         
-        // Only backup if original exists and backup doesn't exist
+        // Case 1: Original config exists - create backup and template from it
         if FileManager.default.fileExists(atPath: configURL.path) &&
            !FileManager.default.fileExists(atPath: backupPath.path) {
             
@@ -121,6 +121,33 @@ struct TemplateProcessor {
                 try FileManager.default.copyItem(at: configURL, to: templateURL)
                 print("📄 Created template from config at: \(templateURL.path)")
             }
+        }
+        // Case 2: No original config exists - create default template
+        else if !FileManager.default.fileExists(atPath: templateURL.path) {
+            print("📄 No existing config found, creating default template at: \(templateURL.path)")
+            
+            let defaultTemplate = """
+{
+  "mcpServers": {
+    "example-server": {
+      "command": "echo",
+      "args": ["Hello from MCP server!"],
+      "env": {
+        "API_KEY": "API_KEY_SECRET",
+        "SECRET_TOKEN": "SECRET_TOKEN_SECRET"
+      }
+    }
+  }
+}
+"""
+            
+            // Create directory if needed
+            let templateDir = templateURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: templateDir, withIntermediateDirectories: true, attributes: nil)
+            
+            // Write default template
+            try defaultTemplate.write(to: templateURL, atomically: true, encoding: .utf8)
+            print("📄 Created default template at: \(templateURL.path)")
         }
     }
 }

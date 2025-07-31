@@ -2,7 +2,7 @@
 
 ###############################################################################
 # Claude Secrets Manager Test Installation Script
-# Simulates what Packages.app installer will do
+# Simulates what Packages.app installer will do with failsafe protection
 # This script is for testing purposes only and should not be used in production environments.
 # It assumes you have already built the binary using `swift build -c release`
 # It will install the binary and plist in the appropriate locations based on the environment (dev or prod).
@@ -10,8 +10,8 @@
 
 set -e
 
-echo "🧪 Claude Secrets Manager Test Installation"
-echo "======================================"
+echo "🧪 Claude Secrets Manager Test Installation (With Failsafe Protection)"
+echo "======================================================================="
 
 # Build first
 echo "🔨 Building Claude Secrets Manager..."
@@ -119,13 +119,43 @@ elif [ "${ENV}" == "dev" ]; then
 fi
 echo "   ✅ Plist installed: ${PLIST_DEST}"
 
-# Enable the daemon
-echo "🚀 Enabling LaunchAgent..."
-launchctl load -w "${PLIST_DEST}"
-echo "   ✅ LaunchAgent enabled and started"
+# Run failsafe protection and enhanced installation
+echo ""
+echo "🛡️  Running failsafe protection..."
+if [[ -f "Packages/Scripts/failsafe-protection.sh" ]]; then
+    bash "Packages/Scripts/failsafe-protection.sh"
+else
+    echo "❌ Failsafe protection script not found"
+    exit 1
+fi
+
+echo ""
+echo "👤 Setting up user permissions..."
+if [[ -f "Packages/Scripts/user-permission-handler.sh" ]]; then
+    bash "Packages/Scripts/user-permission-handler.sh"
+else
+    echo "❌ User permission handler not found"
+    exit 1
+fi
+
+echo ""
+echo "🔧 Running enhanced installation..."
+if [[ -f "Packages/Scripts/enhanced-install.sh" ]]; then
+    bash "Packages/Scripts/enhanced-install.sh"
+else
+    echo "❌ Enhanced installation script not found"
+    exit 1
+fi
+
+# Enable the daemon (optional, can be done manually later)
+echo ""
+echo "🚀 LaunchAgent Installation (Optional)..."
+echo "   Note: This will be handled by the postinstall script in the package"
+echo "   For testing, you can manually enable with: claudesecrets-cli --enable"
 
 # Check status
-echo "Check daemon status:"
+echo ""
+echo "📊 Checking installation status:"
 ${BINARY_CLI_DEST} --status
 
 echo ""

@@ -1,0 +1,179 @@
+#!/bin/bash
+
+###############################################################################
+# Claude Secrets Manager - Package Post-Upgrade Script  
+# Runs after package upgrade to preserve user configurations
+# This script is called automatically when upgrading an existing installation
+###############################################################################
+
+set -e
+
+# Package installer environment
+PACKAGE_PATH="$1"
+DESTINATION_PATH="$2"
+DESTINATION_VOLUME="$3"
+ROOT_PATH="$4"
+
+echo "⬆️  Claude Secrets Manager - Post-Upgrade"
+echo "=========================================="
+echo "Package: $PACKAGE_PATH"
+echo "Destination: $DESTINATION_PATH"
+echo "Volume: $DESTINATION_VOLUME"
+echo "Root: $ROOT_PATH"
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Verify pre-installation ran successfully
+if [[ ! -f "/tmp/claudesecrets-install-state" ]]; then
+    echo "❌ Installation state not found. Pre-installation may have failed."
+    exit 1
+fi
+
+if [[ ! -f "/tmp/claudesecrets-user-env" ]]; then
+    echo "❌ User environment not found. Pre-installation may have failed."
+    exit 1
+fi
+
+# Source the states
+source "/tmp/claudesecrets-install-state"
+source "/tmp/claudesecrets-user-env"
+
+echo ""
+echo "🔍 Upgrade Analysis:"
+echo "   • User: $LOGIN"
+echo "   • Secrets preserved: $([ "$PRESERVE_SECRETS" == "true" ] && echo "YES" || echo "NO")"
+echo "   • Template preserved: $([ "$PRESERVE_TEMPLATE" == "true" ] && echo "YES" || echo "NO")"
+echo "   • Config backed up: $([ "$EXISTING_CONFIG" == "true" ] && echo "YES" || echo "NO")"
+
+echo ""
+echo "🛠️  Performing upgrade-specific tasks..."
+
+# Check if daemon is currently running and stop it
+PLIST_PATH="$LOGINHOMEDIR/Library/LaunchAgents/com.oemden.claudesecrets.plist"
+DAEMON_WAS_RUNNING=false
+
+if launchctl list | grep -q "com.oemden.claudesecrets"; then
+    echo "   🛑 Stopping existing daemon for upgrade..."
+    sudo -u "$LOGIN" launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    DAEMON_WAS_RUNNING=true
+    sleep 2
+    echo "   ✅ Daemon stopped"
+fi
+
+echo ""
+echo "🔧 Running enhanced installation for upgrade..."
+
+# Run enhanced installation (same as fresh install, but with preserved files)
+if [[ -f "$SCRIPT_DIR/enhanced-install.sh" ]]; then
+    bash "$SCRIPT_DIR/enhanced-install.sh"
+    if [[ $? -eq 0 ]]; then
+        echo "✅ Enhanced installation completed successfully"
+    else
+        echo "❌ Enhanced installation failed"
+        exit 1
+    fi
+else
+    echo "❌ Enhanced installation script not found: $SCRIPT_DIR/enhanced-install.sh"
+    exit 1
+fi
+
+echo ""
+echo "🔄 Post-upgrade binary updates..."
+
+# Ensure new binaries have correct permissions
+if [[ -f "/usr/local/bin/claudesecrets" ]]; then
+    chmod +x "/usr/local/bin/claudesecrets"
+    echo "   ✅ Updated claudesecrets binary permissions"
+fi
+
+if [[ -f "/usr/local/bin/claudesecrets-cli" ]]; then
+    chmod +x "/usr/local/bin/claudesecrets-cli"
+    echo "   ✅ Updated claudesecrets-cli binary permissions"
+fi
+
+# Update LaunchAgent plist with new binary paths (in case they changed)
+if [[ -f "$PLIST_PATH" ]]; then
+    # Ensure plist points to correct binary location
+    sed -i '' 's|<string>/opt/dev/bin/claudesecrets</string>|<string>/usr/local/bin/claudesecrets</string>|g' "$PLIST_PATH"
+    chown "$LOGIN:staff" "$PLIST_PATH"
+    chmod 644 "$PLIST_PATH"
+    echo "   ✅ Updated LaunchAgent plist"
+fi
+
+# Restart daemon if it was running before upgrade
+if [[ "$DAEMON_WAS_RUNNING" == "true" ]]; then
+    echo ""
+    echo "🚀 Restarting daemon after upgrade..."
+    sleep 1
+    sudo -u "$LOGIN" launchctl load -w "$PLIST_PATH" 2>/dev/null || true
+    sleep 2
+    
+    # Verify daemon started
+    if launchctl list | grep -q "com.oemden.claudesecrets"; then
+        echo "   ✅ Daemon restarted successfully"
+    else
+        echo "   ⚠️  Daemon may need manual restart: claudesecrets-cli --enable"
+    fi
+fi
+
+# Check if new CLI features are available
+echo ""
+echo "🆕 Checking for new features..."
+
+if /usr/local/bin/claudesecrets-cli --help | grep -q "wipesecrets"; then
+    echo "   ✅ Emergency recovery features available"
+fi
+
+if /usr/local/bin/claudesecrets-cli --help | grep -q "migrate"; then
+    echo "   ✅ Migration features available"
+fi
+
+if /usr/local/bin/claudesecrets-cli --help | grep -q "noclaudesecrets"; then
+    echo "   ✅ Emergency disable features available"
+fi
+
+echo ""
+echo "🧹 Cleaning up upgrade artifacts..."
+
+# Clean up temporary files
+rm -f "/tmp/claudesecrets-install-state" 2>/dev/null || true
+rm -f "/tmp/claudesecrets-user-env" 2>/dev/null || true
+echo "   ✅ Temporary files cleaned up"
+
+echo ""
+echo "🎉 Upgrade Summary" 
+echo "=================="
+echo "✅ Claude Secrets Manager upgraded successfully!"
+echo ""
+echo "🔒 User Configurations:"
+echo "   • Existing secrets: $([ "$PRESERVE_SECRETS" == "true" ] && echo "preserved" || echo "none found")"
+echo "   • Existing template: $([ "$PRESERVE_TEMPLATE" == "true" ] && echo "preserved" || echo "none found")"
+echo "   • Service status: $([ "$DAEMON_WAS_RUNNING" == "true" ] && echo "restarted" || echo "stopped")"
+
+if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+    echo "   • New backups: $BACKUP_DIR"
+fi
+
+echo ""
+echo "📋 What's New in This Version:"
+echo "   • Enhanced emergency recovery commands"
+echo "   • File-to-keychain migration support" 
+echo "   • Improved backup and failsafe protection"
+echo "   • Better user permission handling"
+
+echo ""
+echo "🚀 Post-Upgrade Actions:"
+echo "   1. Check status: claudesecrets-cli --status"
+echo "   2. View new features: claudesecrets-cli --help"
+echo "   3. Test functionality: Launch Claude Desktop/Code"
+
+# Voice notification for upgrade completion
+if command -v say >/dev/null 2>&1; then
+    say "Claude Secrets Manager upgrade complete" &
+fi
+
+echo ""
+echo "✅ Post-upgrade complete!"
+
+exit 0

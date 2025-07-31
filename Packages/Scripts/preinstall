@@ -1,0 +1,65 @@
+#!/bin/bash
+
+###############################################################################
+# Claude Secrets Manager - Package Pre-Installation Script
+# Runs before package installation to protect existing configurations
+# This script is called automatically by the macOS installer
+###############################################################################
+
+set -e
+
+# Package installer environment
+PACKAGE_PATH="$1"
+DESTINATION_PATH="$2"
+DESTINATION_VOLUME="$3"
+ROOT_PATH="$4"
+
+echo "🚀 Claude Secrets Manager - Pre-Installation"
+echo "============================================"
+echo "Package: $PACKAGE_PATH"
+echo "Destination: $DESTINATION_PATH"
+echo "Volume: $DESTINATION_VOLUME"
+echo "Root: $ROOT_PATH"
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo ""
+echo "🔒 Running failsafe protection..."
+
+# Run failsafe protection script
+if [[ -f "$SCRIPT_DIR/failsafe-protection.sh" ]]; then
+    bash "$SCRIPT_DIR/failsafe-protection.sh"
+    if [[ $? -eq 0 ]]; then
+        echo "✅ Failsafe protection completed successfully"
+    else
+        echo "❌ Failsafe protection failed"
+        exit 1
+    fi
+else
+    echo "❌ Failsafe protection script not found: $SCRIPT_DIR/failsafe-protection.sh"
+    exit 1
+fi
+
+echo ""
+echo "👤 Setting up user permissions..."
+
+# Run user permission handler
+if [[ -f "$SCRIPT_DIR/user-permission-handler.sh" ]]; then
+    bash "$SCRIPT_DIR/user-permission-handler.sh"
+    if [[ $? -eq 0 ]]; then
+        echo "✅ User permissions configured successfully"
+    else
+        echo "❌ User permission setup failed"
+        exit 1
+    fi
+else
+    echo "❌ User permission handler not found: $SCRIPT_DIR/user-permission-handler.sh"
+    exit 1
+fi
+
+echo ""
+echo "🛡️  Pre-installation protection complete"
+echo "📦 Package installation can proceed safely"
+
+exit 0

@@ -1,0 +1,165 @@
+#!/bin/bash
+
+###############################################################################
+# Claude Secrets Manager - Package Post-Installation Script
+# Runs after package installation to complete setup
+# This script is called automatically by the macOS installer
+###############################################################################
+
+set -e
+
+# Package installer environment
+PACKAGE_PATH="$1"
+DESTINATION_PATH="$2"
+DESTINATION_VOLUME="$3" 
+ROOT_PATH="$4"
+
+echo "🎯 Claude Secrets Manager - Post-Installation"
+echo "=============================================="
+echo "Package: $PACKAGE_PATH"
+echo "Destination: $DESTINATION_PATH"
+echo "Volume: $DESTINATION_VOLUME"
+echo "Root: $ROOT_PATH"
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Verify pre-installation ran successfully
+if [[ ! -f "/tmp/claudesecrets-install-state" ]]; then
+    echo "❌ Installation state not found. Pre-installation may have failed."
+    exit 1
+fi
+
+if [[ ! -f "/tmp/claudesecrets-user-env" ]]; then
+    echo "❌ User environment not found. Pre-installation may have failed." 
+    exit 1
+fi
+
+echo ""
+echo "🔧 Running enhanced installation..."
+
+# Run enhanced installation script
+if [[ -f "$SCRIPT_DIR/enhanced-install.sh" ]]; then
+    bash "$SCRIPT_DIR/enhanced-install.sh"
+    if [[ $? -eq 0 ]]; then
+        echo "✅ Enhanced installation completed successfully"
+    else
+        echo "❌ Enhanced installation failed"
+        exit 1
+    fi
+else
+    echo "❌ Enhanced installation script not found: $SCRIPT_DIR/enhanced-install.sh"
+    exit 1
+fi
+
+# Source the installation state to get user info
+source "/tmp/claudesecrets-install-state"
+
+echo ""
+echo "⚙️  Processing user installation choices..."
+
+# Handle user choices from installer
+if [[ -f "$SCRIPT_DIR/handle-user-choices.sh" ]]; then
+    bash "$SCRIPT_DIR/handle-user-choices.sh"
+    if [[ $? -eq 0 ]]; then
+        echo "✅ User choices processed successfully"
+    else
+        echo "⚠️  User choice processing had issues (continuing installation)"
+    fi
+else
+    echo "⚠️  User choice handler not found (using defaults)"
+fi
+
+echo ""
+echo "🔧 Final permission adjustments..."
+
+# Ensure all installed binaries have correct permissions
+if [[ -f "/usr/local/bin/claudesecrets" ]]; then
+    chmod +x "/usr/local/bin/claudesecrets"
+    echo "   ✅ claudesecrets binary: executable"
+fi
+
+if [[ -f "/usr/local/bin/claudesecrets-cli" ]]; then
+    chmod +x "/usr/local/bin/claudesecrets-cli"
+    echo "   ✅ claudesecrets-cli binary: executable"
+fi
+
+# Ensure LaunchAgent plist has correct permissions  
+PLIST_PATH="$LOGINHOMEDIR/Library/LaunchAgents/com.oemden.claudesecrets.plist"
+if [[ -f "$PLIST_PATH" ]]; then
+    chown "$LOGIN:staff" "$PLIST_PATH"
+    chmod 644 "$PLIST_PATH"
+    echo "   ✅ LaunchAgent plist: correct permissions"
+fi
+
+echo ""
+echo "🧹 Cleaning up temporary files..."
+
+# Clean up temporary files
+rm -f "/tmp/claudesecrets-install-state" 2>/dev/null || true
+rm -f "/tmp/claudesecrets-user-env" 2>/dev/null || true
+echo "   ✅ Temporary files cleaned up"
+
+echo ""
+echo "🎉 Installation Summary"
+echo "======================="
+
+# Show installation results
+echo "✅ Claude Secrets Manager installed successfully!"
+echo ""
+echo "📁 Installation Details:"
+echo "   • User: $LOGIN"
+echo "   • Home: $LOGINHOMEDIR"
+echo "   • Daemon: /usr/local/bin/claudesecrets"
+echo "   • CLI: /usr/local/bin/claudesecrets-cli"
+echo "   • LaunchAgent: ~/Library/LaunchAgents/com.oemden.claudesecrets.plist"
+
+# Read final state
+if [[ -f "/tmp/claudesecrets-install-state" ]]; then
+    source "/tmp/claudesecrets-install-state"
+    
+    echo ""
+    echo "📋 Configuration Status:"
+    if [[ "$PRESERVE_SECRETS" == "true" ]]; then
+        echo "   • Secrets file: preserved from previous installation"
+    else
+        echo "   • Secrets file: created new template"
+    fi
+    
+    if [[ "$PRESERVE_TEMPLATE" == "true" ]]; then
+        echo "   • Template file: preserved from previous installation" 
+    else
+        echo "   • Template file: created from current Claude config"
+    fi
+    
+    if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+        echo "   • Backups: $BACKUP_DIR"
+    fi
+fi
+
+echo ""
+echo "🚀 Next Steps:"
+echo "   1. Open Terminal and run: claudesecrets-cli --help"
+echo "   2. Configure your secrets: claudesecrets-cli --add API_KEY=your_key"
+echo "   3. Start the service: claudesecrets-cli --enable"
+echo "   4. Check status: claudesecrets-cli --status"
+echo ""
+echo "📖 For detailed instructions, see the README.md file"
+echo "🔗 Documentation: https://github.com/yourrepo/claude-secrets-manager"
+
+# Optional: Show important file locations to user
+echo ""
+echo "📁 Important File Locations:"
+echo "   • Secrets: $LOGINHOMEDIR/.claudesecrets/.claude_secrets"
+echo "   • Template: $LOGINHOMEDIR/Library/Application Support/Claude/claude_desktop_config_template.json"
+echo "   • Claude Config: $LOGINHOMEDIR/Library/Application Support/Claude/claude_desktop_config.json"
+
+# Voice notification (if available and user has sound on)
+if command -v say >/dev/null 2>&1; then
+    say "Claude Secrets Manager installation complete" &
+fi
+
+echo ""
+echo "✅ Post-installation complete!"
+
+exit 0

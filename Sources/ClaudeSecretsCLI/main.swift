@@ -2,6 +2,7 @@
 
 import Foundation
 import SharedConstants
+import KeychainManager
 
 // MARK: - Shared Components (will be moved to shared module later)
 
@@ -143,6 +144,7 @@ struct CLICommands {
             -h, --help                     Show this help message
             -s, --status                   Show current daemon and configuration status
             -c, --config                   Show current configuration settings
+            -l, --list-secrets [file|keychain] List all stored secrets
             -v, --voice [on|off]          Enable/disable voice notifications
             -n, --notifications [on|off]  Enable/disable macOS notifications
         
@@ -218,6 +220,22 @@ struct CLICommands {
                 
             case "-c", "--config":
                 showConfig()
+                return true
+                
+            case "-l", "--list-secrets":
+                if i + 1 < args.count {
+                    let mechanism = args[i + 1]
+                    if mechanism == "file" || mechanism == "keychain" {
+                        listSecrets(mechanism: mechanism)
+                        i += 1
+                    } else {
+                        print("❌ --list-secrets requires: file|keychain")
+                        return true
+                    }
+                } else {
+                    // Default to current mechanism
+                    listSecrets(mechanism: Preferences.secretsMechanism)
+                }
                 return true
                 
             case "-v", "--voice":
@@ -508,13 +526,60 @@ struct CLICommands {
     }
     
     static func addSecretsToKeychain(_ secrets: [String: String]) {
-        print("🔑 Keychain support not yet implemented")
-        print("   Will add \(secrets.count) secrets to keychain")
+        var addedCount = 0
+        var modifiedCount = 0
+        
+        for (key, value) in secrets {
+            do {
+                if KeychainManager.exists(account: key) {
+                    try KeychainManager.store(account: key, value: value)
+                    print("  ✅ Modified: \(key)")
+                    modifiedCount += 1
+                } else {
+                    try KeychainManager.store(account: key, value: value)
+                    print("  ✅ Added: \(key)")
+                    addedCount += 1
+                }
+            } catch {
+                print("  ❌ Failed to store \(key): \(error.localizedDescription)")
+                continue
+            }
+        }
+        
+        // Show appropriate success message
+        if addedCount > 0 && modifiedCount > 0 {
+            print("✅ Successfully added \(addedCount) and modified \(modifiedCount) secret(s) in keychain")
+        } else if addedCount > 0 {
+            print("✅ Successfully added \(addedCount) secret(s) to keychain")
+        } else if modifiedCount > 0 {
+            print("✅ Successfully modified \(modifiedCount) secret(s) in keychain")
+        }
     }
     
     static func deleteSecretsFromKeychain(_ variables: [String]) {
-        print("🔑 Keychain support not yet implemented") 
-        print("   Will delete \(variables.count) variables from keychain")
+        var deletedCount = 0
+        var notFoundCount = 0
+        
+        for variable in variables {
+            do {
+                try KeychainManager.delete(account: variable)
+                print("  ✅ Deleted: \(variable)")
+                deletedCount += 1
+            } catch KeychainError.itemNotFound {
+                print("  ⚠️  Not found: \(variable)")
+                notFoundCount += 1
+            } catch {
+                print("  ❌ Failed to delete \(variable): \(error.localizedDescription)")
+                continue
+            }
+        }
+        
+        if deletedCount > 0 {
+            print("✅ Successfully deleted \(deletedCount) variable(s) from keychain")
+        }
+        if notFoundCount > 0 {
+            print("ℹ️  \(notFoundCount) variable(s) were not found in keychain")
+        }
     }
     
     static func createTemplateFromCurrentConfig() {
@@ -599,6 +664,41 @@ struct CLICommands {
         print("   • Monitor Interval: \(Preferences.processMonitoringInterval)s")
         print("   • First Run: \(Preferences.isFirstRun ? "Yes" : "No")")
         print("   • Reset at Launch: \(Preferences.alwaysResetConfigAtLaunch ? "Yes" : "No")")
+    }
+    
+    static func listSecrets(mechanism: String) {
+        print("🔍 Listing secrets from \(mechanism)")
+        print(String(repeating: "=", count: 40))
+        
+        if mechanism == "file" {
+            do {
+                let secrets = try SecretsParser.parseSecretsFile(at: Preferences.secretsFile)
+                if secrets.isEmpty {
+                    print("📄 No secrets found in file")
+                } else {
+                    print("📄 Found \(secrets.count) secret(s) in file:")
+                    for (key, _) in secrets.sorted(by: { $0.key < $1.key }) {
+                        print("   • \(key): ****")
+                    }
+                }
+            } catch {
+                print("❌ Failed to read secrets file: \(error.localizedDescription)")
+            }
+        } else {
+            do {
+                let secrets = try KeychainManager.listAll()
+                if secrets.isEmpty {
+                    print("🔑 No secrets found in keychain")
+                } else {
+                    print("🔑 Found \(secrets.count) secret(s) in keychain:")
+                    for key in secrets.keys.sorted() {
+                        print("   • \(key): ****")
+                    }
+                }
+            } catch {
+                print("❌ Failed to read secrets from keychain: \(error.localizedDescription)")
+            }
+        }
     }
     
     static func isDaemonRunning() -> Bool {

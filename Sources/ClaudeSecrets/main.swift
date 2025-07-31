@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import UserNotifications
 import SharedConstants
+import KeychainManager
 
 // MARK: - Configuration
 struct Config {
@@ -1097,11 +1098,22 @@ class AppMonitor {
     
     // MARK: - Shared Template Processing
     private func loadSecretsAndProcessTemplate(templatePath: String, outputPath: String) throws {
-        // Load secrets fresh from file
-        let secretsPath = Preferences.secretsFile
-        Logger.shared.info("🔐 Loading secrets on-demand from: \(secretsPath)")
-        let secrets = try SecretsParser.parseSecretsFile(at: secretsPath)
-        Logger.shared.success("🔐 Loaded \(secrets.count) secrets for template processing")
+        // Load secrets based on configured mechanism
+        let mechanism = Preferences.secretsMechanism
+        Logger.shared.info("🔐 Loading secrets on-demand using \(mechanism) mechanism")
+        
+        let secrets: [String: String]
+        
+        if mechanism == "keychain" {
+            secrets = try KeychainManager.listAll()
+            Logger.shared.success("🔑 Loaded \(secrets.count) secrets from keychain for template processing")
+        } else {
+            // Default to file mechanism
+            let secretsPath = Preferences.secretsFile
+            Logger.shared.info("📄 Loading from file: \(secretsPath)")
+            secrets = try SecretsParser.parseSecretsFile(at: secretsPath)
+            Logger.shared.success("📄 Loaded \(secrets.count) secrets from file for template processing")
+        }
         
         // Process template with fresh secrets
         try TemplateProcessor.processTemplate(

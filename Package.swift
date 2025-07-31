@@ -23,13 +23,17 @@ let package = Package(
             name: "SharedConstants",
             dependencies: []
         ),
-        .executableTarget(
-            name: "ClaudeSecrets",
+        .target(
+            name: "KeychainManager",
             dependencies: ["SharedConstants"]
         ),
         .executableTarget(
+            name: "ClaudeSecrets",
+            dependencies: ["SharedConstants", "KeychainManager"]
+        ),
+        .executableTarget(
             name: "ClaudeSecretsCLI",
-            dependencies: ["SharedConstants"]
+            dependencies: ["SharedConstants", "KeychainManager"]
         )
     ]
 )

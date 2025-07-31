@@ -61,4 +61,12 @@ public enum SharedConstants {
     
     /// Default secrets mechanism
     public static let defaultSecretsMechanism = "file"
+    
+    // MARK: - Keychain Configuration
+    
+    /// Keychain service identifier for Claude Secrets Manager
+    public static let keychainService = "claudesecrets"
+    
+    /// Keychain accessibility level
+    public static let keychainAccessibility = "kSecAttrAccessibleWhenUnlocked"
 }

@@ -254,9 +254,28 @@ struct CLICommands {
                 
             case "-a", "--add":
                 if i + 1 < args.count {
-                    let secrets = parseSecrets(args[i + 1])
-                    addSecrets(secrets, mechanism: mechanism)
-                    i += 1
+                    // Collect all arguments until next flag or end
+                    var secretArgs: [String] = []
+                    var j = i + 1
+                    while j < args.count && !args[j].hasPrefix("-") {
+                        secretArgs.append(args[j])
+                        j += 1
+                    }
+                    
+                    if secretArgs.isEmpty {
+                        print("❌ --add requires secrets in format: VAR=VALUE or VAR1=VALUE1,VAR2=VALUE2")
+                        return true
+                    }
+                    
+                    // Parse all collected secret arguments
+                    var allSecrets: [String: String] = [:]
+                    for secretArg in secretArgs {
+                        let secrets = parseSecrets(secretArg)
+                        allSecrets.merge(secrets) { _, new in new }
+                    }
+                    
+                    addSecrets(allSecrets, mechanism: mechanism)
+                    i = j - 1 // Move index to last processed argument
                 } else {
                     print("❌ --add requires secrets in format: VAR=VALUE or VAR1=VALUE1,VAR2=VALUE2")
                     return true
@@ -267,9 +286,28 @@ struct CLICommands {
                 
             case "-d", "--delete":
                 if i + 1 < args.count {
-                    let variables = parseVariables(args[i + 1])
-                    deleteSecrets(variables, mechanism: mechanism)
-                    i += 1
+                    // Collect all arguments until next flag or end
+                    var variableArgs: [String] = []
+                    var j = i + 1
+                    while j < args.count && !args[j].hasPrefix("-") {
+                        variableArgs.append(args[j])
+                        j += 1
+                    }
+                    
+                    if variableArgs.isEmpty {
+                        print("❌ --delete requires variable names: VAR or VAR1,VAR2")
+                        return true
+                    }
+                    
+                    // Parse all collected variable arguments
+                    var allVariables: [String] = []
+                    for variableArg in variableArgs {
+                        let variables = parseVariables(variableArg)
+                        allVariables.append(contentsOf: variables)
+                    }
+                    
+                    deleteSecrets(allVariables, mechanism: mechanism)
+                    i = j - 1 // Move index to last processed argument
                 } else {
                     print("❌ --delete requires variable names: VAR or VAR1,VAR2")
                     return true
@@ -355,7 +393,7 @@ struct CLICommands {
     }
     
     static func addSecrets(_ secrets: [String: String], mechanism: String) {
-        print("🔐 Adding \(secrets.count) secret(s) using \(mechanism) mechanism...")
+        print("🔐 Processing \(secrets.count) secret(s) using \(mechanism) mechanism...")
         
         if mechanism == "file" {
             addSecretsToFile(secrets)
@@ -385,10 +423,21 @@ struct CLICommands {
                 existingSecrets = try SecretsParser.parseSecretsFile(at: Preferences.secretsFile)
             }
             
+            // Track added vs modified
+            var addedCount = 0
+            var modifiedCount = 0
+            
             // Merge new secrets with existing ones
             for (key, value) in secrets {
-                existingSecrets[key] = value
-                print("  ✅ Added: \(key)")
+                if existingSecrets[key] != nil {
+                    existingSecrets[key] = value
+                    print("  ✅ Modified: \(key)")
+                    modifiedCount += 1
+                } else {
+                    existingSecrets[key] = value
+                    print("  ✅ Added: \(key)")
+                    addedCount += 1
+                }
             }
             
             // Write updated secrets back to file
@@ -405,7 +454,14 @@ struct CLICommands {
             // Set secure permissions
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: secretsPath)
             
-            print("✅ Successfully added \(secrets.count) secret(s) to \(secretsPath)")
+            // Show appropriate success message
+            if addedCount > 0 && modifiedCount > 0 {
+                print("✅ Successfully added \(addedCount) and modified \(modifiedCount) secret(s) in \(secretsPath)")
+            } else if addedCount > 0 {
+                print("✅ Successfully added \(addedCount) secret(s) to \(secretsPath)")
+            } else if modifiedCount > 0 {
+                print("✅ Successfully modified \(modifiedCount) secret(s) in \(secretsPath)")
+            }
             
         } catch {
             print("❌ Failed to add secrets to file: \(error.localizedDescription)")

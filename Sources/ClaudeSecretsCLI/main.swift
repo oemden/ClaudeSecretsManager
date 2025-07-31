@@ -163,6 +163,11 @@ struct CLICommands {
             -E, --enable                  Enable and start LaunchAgent daemon
             -D, --disable                 Disable and stop LaunchAgent daemon
             -R, --restore                 Restore original Claude config and disable daemon
+            --migrate [file-to-keychain] [--emptysecretfile]  
+                                         Migrate secrets between storage mechanisms
+                                         --emptysecretfile: Empty source file after migration
+            --noclaudesecrets            Emergency disable: stop daemon, restore config
+            --wipesecrets                Delete ALL secrets from both file and keychain
         
         EXAMPLES:
             claudeautoconfig --add API_KEY=abc123 -m file
@@ -173,6 +178,10 @@ struct CLICommands {
             claudeautoconfig --enable
             claudeautoconfig --status
             claudeautoconfig --disable
+            claudeautoconfig --migrate file-to-keychain
+            claudeautoconfig --migrate file-to-keychain --emptysecretfile
+            claudeautoconfig --noclaudesecrets
+            claudeautoconfig --wipesecrets
         
         COMPLEX VALUES (use single quotes to protect special characters):
             claudeautoconfig -a 'API_URL=https://api.example.com/v1' -m file
@@ -362,6 +371,33 @@ struct CLICommands {
                 
             case "-R", "--restore":
                 restoreOriginalConfig()
+                return true
+                
+            case "--migrate":
+                if i + 1 < args.count {
+                    let migrationType = args[i + 1]
+                    if migrationType == "file-to-keychain" {
+                        // Check for --emptysecretfile flag
+                        let emptysecretfile = (i + 2 < args.count && args[i + 2] == "--emptysecretfile")
+                        migrateSecretsFileToKeychain(emptysecretfile: emptysecretfile)
+                        i += emptysecretfile ? 2 : 1
+                    } else {
+                        print("❌ --migrate requires: file-to-keychain [--emptysecretfile]")
+                        return true
+                    }
+                } else {
+                    print("❌ --migrate requires migration type: file-to-keychain [--emptysecretfile]")
+                    return true
+                }
+                return true
+                
+            case "--noclaudesecrets":
+                emergencyDisableClaudeSecrets()
+                return true
+                
+            case "--wipesecrets":
+                wipeAllSecrets()
+                return true
                 
             default:
                 print("❌ Unknown argument: \(arg)")
@@ -906,6 +942,330 @@ struct CLICommands {
         } else {
             print("ℹ️  No secrets added")
         }
+    }
+    
+    static func migrateSecretsFileToKeychain(emptysecretfile: Bool = false) {
+        print("🔄 Migrating secrets from file to keychain")
+        print(String(repeating: "=", count: 50))
+        
+        do {
+            // Read secrets from file
+            let fileSecrets = try SecretsParser.parseSecretsFile(at: Preferences.secretsFile)
+            
+            if fileSecrets.isEmpty {
+                print("ℹ️  No secrets found in file to migrate")
+                return
+            }
+            
+            print("📄 Found \(fileSecrets.count) secret(s) in file:")
+            for key in fileSecrets.keys.sorted() {
+                print("   • \(key)")
+            }
+            
+            print("\n🔑 Migrating to keychain...")
+            
+            var successCount = 0
+            var failCount = 0
+            
+            for (key, value) in fileSecrets {
+                do {
+                    try KeychainManager.store(account: key, value: value)
+                    print("  ✅ Migrated: \(key)")
+                    successCount += 1
+                } catch {
+                    print("  ❌ Failed to migrate \(key): \(error.localizedDescription)")
+                    failCount += 1
+                }
+            }
+            
+            print("\n📊 Migration Results:")
+            print("   ✅ Successfully migrated: \(successCount)")
+            if failCount > 0 {
+                print("   ❌ Failed to migrate: \(failCount)")
+            }
+            
+            if successCount > 0 {
+                print("\n🔧 Next Steps:")
+                print("   1. Set mechanism to keychain:")
+                print("      defaults write com.oemden.claudesecrets secrets_mechanism \"keychain\"")
+                print("   2. Test keychain access:")
+                print("      claudesecrets-cli --list-secrets keychain")
+                print("   3. Verify daemon works with keychain:")
+                print("      claudesecrets-cli --status")
+                
+                if successCount == fileSecrets.count {
+                    print("\n💡 Migration complete!")
+                    
+                    if emptysecretfile {
+                        // Empty the secrets file
+                        print("🗂️  Emptying secrets file as requested...")
+                        do {
+                            let secretsFilePath = Preferences.secretsFile.expandingTildeInPath
+                            
+                            // Create backup first
+                            let backupPath = secretsFilePath + ".migrated.backup.\(Int(Date().timeIntervalSince1970))"
+                            try FileManager.default.copyItem(atPath: secretsFilePath, toPath: backupPath)
+                            print("   📋 Backup created: \(backupPath)")
+                            
+                            // Write empty file (keep the file but remove contents)
+                            try "# Claude Secrets File\n# This file was emptied after migration to keychain\n# Original contents backed up to: \(URL(fileURLWithPath: backupPath).lastPathComponent)\n".write(toFile: secretsFilePath, atomically: true, encoding: .utf8)
+                            
+                            print("   ✅ Secrets file emptied (backup preserved)")
+                        } catch {
+                            print("   ❌ Failed to empty secrets file: \(error.localizedDescription)")
+                            print("   💡 You can manually empty it after verifying keychain migration")
+                        }
+                    } else {
+                        print("   💡 Consider backing up your secrets file before deletion:")
+                        print("   cp \(Preferences.secretsFile.expandingTildeInPath) \(Preferences.secretsFile.expandingTildeInPath).backup")
+                        print("   💡 Or use --emptysecretfile flag next time to auto-empty the file")
+                    }
+                }
+            }
+            
+        } catch {
+            print("❌ Failed to read secrets file: \(error.localizedDescription)")
+            print("   Make sure the file exists: \(Preferences.secretsFile)")
+        }
+    }
+    
+    /// Emergency disable function - stops daemon, disables LaunchAgent, restores config
+    static func emergencyDisableClaudeSecrets() {
+        print("🚨 Emergency Recovery: Disabling Claude Secrets Manager")
+        print(String(repeating: "=", count: 60))
+        
+        var actionsPerformed: [String] = []
+        var warnings: [String] = []
+        
+        // 1. Stop the daemon
+        print("🛑 Stopping daemon...")
+        let launchAgentPath = "\(NSHomeDirectory())/Library/LaunchAgents/\(SharedConstants.launchAgentPlistName)"
+        
+        let stopProcess = Process()
+        stopProcess.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        stopProcess.arguments = ["unload", launchAgentPath]
+        
+        do {
+            try stopProcess.run()
+            stopProcess.waitUntilExit()
+            
+            if stopProcess.terminationStatus == 0 {
+                print("  ✅ Daemon stopped")
+                actionsPerformed.append("Daemon stopped")
+            } else {
+                print("  ⚠️  Could not stop daemon (may not be running)")
+                warnings.append("Daemon stop failed or wasn't running")
+            }
+        } catch {
+            print("  ❌ Failed to stop daemon: \(error.localizedDescription)")
+            warnings.append("Daemon stop failed: \(error.localizedDescription)")
+        }
+        
+        // 2. Disable LaunchAgent plist
+        print("📝 Disabling LaunchAgent...")
+        let plistPath = "~/Library/LaunchAgents/\(SharedConstants.launchAgentPlistName)".expandingTildeInPath
+        
+        if FileManager.default.fileExists(atPath: plistPath) {
+            do {
+                // Read current plist
+                let plistData = try Data(contentsOf: URL(fileURLWithPath: plistPath))
+                if var plist = try PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] {
+                    // Add Disabled key
+                    plist["Disabled"] = true
+                    
+                    // Write back
+                    let updatedData = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+                    try updatedData.write(to: URL(fileURLWithPath: plistPath))
+                    
+                    print("  ✅ LaunchAgent disabled")
+                    actionsPerformed.append("LaunchAgent disabled")
+                } else {
+                    throw NSError(domain: "InvalidPlist", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid plist format"])
+                }
+            } catch {
+                print("  ❌ Failed to disable LaunchAgent: \(error.localizedDescription)")
+                warnings.append("LaunchAgent disable failed")
+            }
+        } else {
+            print("  ℹ️  LaunchAgent plist not found")
+            warnings.append("LaunchAgent plist not found")
+        }
+        
+        // 3. Restore original config
+        print("📂 Restoring original configuration...")
+        let configPath = SharedConstants.outputPath.expandingTildeInPath
+        
+        // Try multiple backup file names (order of preference)
+        let possibleBackupPaths = [
+            SharedConstants.backupPath.expandingTildeInPath,  // firstrun.backup.json
+            "\(SharedConstants.claudeConfigDir.expandingTildeInPath)/claude_desktop_config.backup.json", // backup.json
+            "\(SharedConstants.claudeConfigDir.expandingTildeInPath)/claude_desktop_config.original.json" // original.json
+        ]
+        
+        var backupRestored = false
+        for backupPath in possibleBackupPaths {
+            if FileManager.default.fileExists(atPath: backupPath) {
+                do {
+                    if FileManager.default.fileExists(atPath: configPath) {
+                        try FileManager.default.removeItem(atPath: configPath)
+                    }
+                    try FileManager.default.copyItem(atPath: backupPath, toPath: configPath)
+                    print("  ✅ Original configuration restored from: \(URL(fileURLWithPath: backupPath).lastPathComponent)")
+                    actionsPerformed.append("Configuration restored from backup")
+                    backupRestored = true
+                    break
+                } catch {
+                    print("  ❌ Failed to restore from \(URL(fileURLWithPath: backupPath).lastPathComponent): \(error.localizedDescription)")
+                    continue
+                }
+            }
+        }
+        
+        if !backupRestored {
+            print("  ⚠️  No backup found to restore")
+            print("     Searched for:")
+            for backupPath in possibleBackupPaths {
+                print("     • \(backupPath)")
+            }
+            warnings.append("No backup file found")
+        }
+        
+        // 4. Ask about secrets
+        print("\n🤔 What to do with stored secrets?")
+        print("   Your secrets are still stored and can be accessed by:")
+        if Preferences.secretsMechanism == "keychain" {
+            print("   • claudesecrets-cli --list-secrets keychain")
+        } else {
+            print("   • claudesecrets-cli --list-secrets file")
+        }
+        print("\n   To completely remove all secrets, run:")
+        print("   • claudesecrets-cli --wipesecrets")
+        
+        // Summary
+        print("\n📊 Recovery Summary:")
+        if !actionsPerformed.isEmpty {
+            print("✅ Actions completed:")
+            for action in actionsPerformed {
+                print("   • \(action)")
+            }
+        }
+        
+        if !warnings.isEmpty {
+            print("⚠️  Warnings:")
+            for warning in warnings {
+                print("   • \(warning)")
+            }
+        }
+        
+        print("\n✨ Claude Secrets Manager has been disabled")
+        print("   Claude Desktop will now use its original configuration")
+        print("   To re-enable later, run: claudesecrets-cli --enable")
+    }
+    
+    /// Wipe all secrets from both file and keychain storage
+    static func wipeAllSecrets() {
+        print("🗑️  Secret Cleanup: Removing all stored secrets")
+        print(String(repeating: "=", count: 50))
+        
+        print("⚠️  WARNING: This will permanently delete ALL secrets!")
+        print("   This affects both file and keychain storage")
+        print("   This action cannot be undone\n")
+        
+        print("Type 'DELETE' to confirm secret deletion: ", terminator: "")
+        guard let confirmation = readLine(), confirmation == "DELETE" else {
+            print("❌ Deletion cancelled")
+            return
+        }
+        
+        var deletedCount = 0
+        var errors: [String] = []
+        
+        // 1. Clean keychain secrets
+        print("\n🔑 Cleaning keychain secrets...")
+        do {
+            let keychainSecrets = try KeychainManager.listAll()
+            if !keychainSecrets.isEmpty {
+                for account in keychainSecrets.keys {
+                    do {
+                        try KeychainManager.delete(account: account)
+                        print("  ✅ Deleted keychain: \(account)")
+                        deletedCount += 1
+                    } catch {
+                        print("  ❌ Failed to delete keychain \(account): \(error.localizedDescription)")
+                        errors.append("Keychain \(account): \(error.localizedDescription)")
+                    }
+                }
+            } else {
+                print("  ℹ️  No keychain secrets found")
+            }
+        } catch {
+            print("  ❌ Failed to list keychain secrets: \(error.localizedDescription)")
+            errors.append("Keychain listing: \(error.localizedDescription)")
+        }
+        
+        // 2. Clean file secrets
+        print("\n📄 Cleaning file secrets...")
+        let secretsFilePath = Preferences.secretsFile.expandingTildeInPath
+        
+        if FileManager.default.fileExists(atPath: secretsFilePath) {
+            do {
+                // Read file to count entries before deletion
+                let fileSecrets = try SecretsParser.parseSecretsFile(at: Preferences.secretsFile)
+                let fileCount = fileSecrets.count
+                
+                // Create backup first
+                let backupPath = secretsFilePath + ".wiped.backup.\(Int(Date().timeIntervalSince1970))"
+                try FileManager.default.copyItem(atPath: secretsFilePath, toPath: backupPath)
+                print("  📋 Backup created: \(backupPath)")
+                
+                // Delete original file
+                try FileManager.default.removeItem(atPath: secretsFilePath)
+                print("  ✅ Deleted file with \(fileCount) secret(s)")
+                deletedCount += fileCount
+                
+            } catch {
+                print("  ❌ Failed to delete secrets file: \(error.localizedDescription)")
+                errors.append("File deletion: \(error.localizedDescription)")
+            }
+        } else {
+            print("  ℹ️  No secrets file found")
+        }
+        
+        // 3. Clean secrets directory if empty
+        let secretsDirPath = (Preferences.secretsFile as NSString).deletingLastPathComponent.expandingTildeInPath
+        if FileManager.default.fileExists(atPath: secretsDirPath) {
+            do {
+                let contents = try FileManager.default.contentsOfDirectory(atPath: secretsDirPath)
+                let nonBackupFiles = contents.filter { !$0.contains(".backup") }
+                
+                if nonBackupFiles.isEmpty {
+                    print("  🗂️  Secrets directory is empty (keeping backup files)")
+                } else {
+                    print("  📁 Secrets directory contains other files, keeping it")
+                }
+            } catch {
+                print("  ⚠️  Could not check secrets directory contents")
+            }
+        }
+        
+        // Summary
+        print("\n📊 Cleanup Summary:")
+        if deletedCount > 0 {
+            print("✅ Successfully deleted \(deletedCount) secret(s)")
+        } else {
+            print("ℹ️  No secrets were found to delete")
+        }
+        
+        if !errors.isEmpty {
+            print("❌ Errors encountered:")
+            for error in errors {
+                print("   • \(error)")
+            }
+        }
+        
+        print("\n🧹 Secret cleanup complete")
+        print("   All secrets have been removed from both storage mechanisms")
+        print("   Backup files (if any) have been preserved")
     }
 }
 

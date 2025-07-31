@@ -1,6 +1,6 @@
-# Claude Secrets Manager
+# Claude Secrets Manager v0.4.2
 
-A macOS daemon that monitors Claude Desktop/Code launch events and manages configuration with secure secrets injection. This project aims to enable vibe coding while dealing with secrets management for Claude config.
+A production-ready macOS daemon that monitors Claude Desktop/Code launch events and manages configuration with secure secrets injection. Features seamless keychain integration, encrypted package upgrades, and intelligent logging. This project enables vibe coding while maintaining enterprise-grade security for secrets management.
 
 ## Project Goal
 
@@ -15,7 +15,24 @@ As of now I have not dealt with complex strings and how they are handled in a JS
 
 **⚠️ This is a side project - use at your own risk and ALWAYS BACKUP your config files before using the tool, although there is a built-in config backup at first run and installation process.**
 
-## Features
+## 🚀 What's New in v0.4.2 (November 2024)
+
+**Major Breakthrough**: Keychain GUI prompts eliminated! Package upgrades now seamlessly preserve all keychain secrets without user intervention.
+
+### Key Enhancements:
+- **🔐 Seamless Package Upgrades**: AES-256-CBC encrypted export/import system eliminates keychain ownership issues during installation
+- **📦 Bulk Import Operations**: `--migrate --file` command for importing secrets from external files
+- **🔧 Intelligent Logging**: 3-level system (minimal/normal/debug) dramatically reduces log noise while maintaining debugging capability
+- **🛡️ Enterprise Security**: Random key generation with OpenSSL, service isolation, comprehensive error recovery
+- **📊 Production Package**: Complete `.pkg` installer with automated pre/post-install scripts and certificate signing
+
+### Technical Improvements:
+- **EncryptionManager**: AES-256-CBC with 16-byte IV and PBKDF2 key derivation
+- **Service Isolation**: Separate `claudesecretsupgradekey` service prevents keychain conflicts
+- **Logger System**: Preference-controlled verbosity with immediate effect
+- **Package Scripts**: XCreds-pattern installation with robust user detection and error handling
+
+## Features (v0.4.2)
 
 - ✅ **Secure Storage**: File-based or macOS Keychain secrets storage
 - ✅ **Process Monitoring**: Detects Claude Desktop & Claude Code launch/quit
@@ -25,14 +42,23 @@ As of now I have not dealt with complex strings and how they are handled in a JS
 - ✅ **LaunchAgent**: Automatic startup and background operation
 - ✅ **Backup System**: Automatic config backup on first run
 - ✅ **Dual Mechanism**: Switch between file and keychain storage seamlessly
+- 🆕 **Seamless Upgrades**: AES-256-CBC encrypted export/import for package installations
+- 🆕 **Bulk Import**: Import secrets from external files with `--migrate --file`
+- 🆕 **Intelligent Logging**: 3-level logging system (minimal/normal/debug) with preference control
+- 🆕 **Package Installer**: Complete `.pkg` installer with pre/post-install automation
+- 🆕 **Enterprise Security**: Random key generation, service isolation, comprehensive error handling
 
 ## Quick Start
 
 ### Installation
 
 **For Release Users (Recommended):**
-- Download and install the `.pkg` installer (coming soon)
-- The installer handles everything automatically
+- Download and install the `.pkg` installer 
+- The installer handles everything automatically including:
+  - Keychain secrets export/import during upgrades
+  - Automatic backup of existing configurations
+  - LaunchAgent setup and daemon startup
+  - User preference initialization
 
 **For Development/Testing:**
 ```bash
@@ -42,7 +68,10 @@ cd "Claude Auto Config"
 swift build -c release
 
 # Install binaries and LaunchAgent (dev/testing)
-./test_install.sh
+./Tests/test_install.sh
+
+# Build complete package
+./build-and-package.sh
 ```
 
 ### Basic Usage
@@ -109,25 +138,36 @@ Simply use variable names directly in your template:
 4. **Config Generation** → Final config written
 5. **Quit Detection** → Original config restored (optional)
 
-## Project Structure
+## Project Structure (v0.4.2)
 ```
 Claude Auto Config/
 ├── Package.swift                    # Swift Package Manager
-├── Makefile                         # Build shortcuts  
-├── test_install.sh                  # Installation script
+├── Makefile                         # Build shortcuts
+├── build-and-package.sh            # Complete build and package script
 ├── Sources/
 │   ├── ClaudeSecrets/              # Main daemon
 │   │   ├── main.swift
 │   │   └── SecretsParser.swift
-│   ├── ClaudeSecretsCLI/           # CLI tool
-│   │   └── main.swift
+│   ├── ClaudeSecretsCLI/           # Enhanced CLI tool
+│   │   └── main.swift              # Export/import, bulk operations, 3-level logging
 │   ├── KeychainManager/            # Keychain integration
 │   │   └── KeychainManager.swift
-│   └── SharedConstants/            # Shared configuration
+│   └── SharedConstants/            # Shared configuration (v0.4.2)
 │       └── SharedConstants.swift
-├── com.oemden.claudesecrets.plist  # LaunchAgent plist
+├── LaunchAgent/
+│   └── com.oemden.claudesecrets.plist # LaunchAgent plist
+├── Packages/                        # Complete installer package
+│   ├── ClaudeSecretsManager.pkgproj # Packages project file
+│   ├── CERTIFICATE_SETUP.md         # Code signing instructions
+│   └── Scripts/
+│       ├── preinstall               # Export keychain, backup files
+│       └── postinstall              # Import keychain, configure system
+├── Tests/
+│   ├── test_install.sh              # Development installation
+│   ├── test_uninstall.sh           # Clean removal
+│   └── check_setup.sh               # Setup verification
 └── secrets/
-    └── claude_secrets              # File-based secrets (if used)
+    └── .claude_secrets.exemple      # Example secrets file
 ```
 
 ## CLI Commands
@@ -150,13 +190,20 @@ claudesecrets-cli --list-secrets file
 defaults write com.oemden.claudesecrets secrets_mechanism "keychain"
 ```
 
-### Migration (File to Keychain)
+### Migration & Bulk Operations (v0.4.2)
 ```bash
 # Migrate from file-based to keychain storage
 claudesecrets-cli --migrate file-to-keychain
 
 # Migrate and automatically empty the source file (with backup)
 claudesecrets-cli --migrate file-to-keychain --emptysecretfile
+
+# Bulk import from external file
+claudesecrets-cli --migrate --file /path/to/secrets.txt
+
+# Package upgrade migration (automatic during installation)
+claudesecrets-cli --upgrade --export    # Export before upgrade
+claudesecrets-cli --upgrade --import     # Import after upgrade
 
 # After migration, switch mechanism
 defaults write com.oemden.claudesecrets secrets_mechanism "keychain"
@@ -174,7 +221,7 @@ claudesecrets-cli --noclaudesecrets
 claudesecrets-cli --wipesecrets
 ```
 
-### Daemon Management
+### Daemon Management & Logging (v0.4.2)
 ```bash
 # Status and configuration
 claudesecrets-cli --status
@@ -185,6 +232,11 @@ claudesecrets-cli --install    # Install plist
 claudesecrets-cli --enable     # Start daemon
 claudesecrets-cli --disable    # Stop daemon
 claudesecrets-cli --uninstall  # Remove plist
+
+# Logging control (NEW in v0.4.2)
+defaults write com.oemden.claudesecrets log_level "minimal"   # Errors only
+defaults write com.oemden.claudesecrets log_level "normal"    # Standard output
+defaults write com.oemden.claudesecrets log_level "debug"     # Verbose debugging
 
 # Notifications
 claudesecrets-cli --voice on
@@ -225,17 +277,24 @@ ENV="dev" ./test_install.sh
 # Production installation  
 ENV="prod" ./test_install.sh
 
-# Check logs
+# Check logs (v0.4.2 enhanced logging)
 tail -f /tmp/claudesecrets.log
+
+# Control log verbosity
+defaults write com.oemden.claudesecrets log_level "minimal"  # Errors only
+defaults write com.oemden.claudesecrets log_level "debug"    # Full debugging
 ```
 
-## Security Notes
+## Security Notes (Enhanced in v0.4.2)
 
 - **Keychain**: Uses `kSecAttrAccessibleWhenUnlocked` for daemon access
 - **File Storage**: Set to 600 permissions (owner read/write only)  
-- **Service ID**: "claudesecrets" in keychain
+- **Service ID**: "claudesecrets" in keychain, "claudesecretsupgradekey" for migration
 - **Code Signing**: Required for production keychain access
 - **Backup**: Automatic config backup before first modification
+- **Migration Security**: AES-256-CBC encryption with random keys via OpenSSL  
+- **Service Isolation**: Separate keychain services prevent conflicts during upgrades
+- **Error Recovery**: Comprehensive error handling with automatic cleanup
 
 ## Compatibility
 

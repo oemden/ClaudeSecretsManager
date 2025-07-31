@@ -4,26 +4,125 @@ import UserNotifications
 
 // MARK: - Configuration
 struct Config {
-    // Dynamic configuration via preferences
-    static var claudeDesktopBundleID: String {
-        return Preferences.claudeDesktopBundleID
+    // Change these two lines to switch applications/executables
+    static let targetApplication = "Claude.app"     // "TextEdit.app" or "Claude.app"  
+    static let targetExecutable = "claude"           // "sleep" or "claude"
+    
+    // Auto-deduce bundle IDs dynamically from app name (cached)
+    static var targetAppBundleID: String {
+        if _cachedBundleID == nil {
+            _cachedBundleID = findAppBundleID(targetApplication)
+        }
+        return _cachedBundleID!
+    }
+    private static var _cachedBundleID: String?
+    
+    // Helper function to find app bundle ID using osascript
+    private static func findAppBundleID(_ appName: String) -> String {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", "id of app \"\(appName)\""]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe() // Suppress error output
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let bundleID = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !bundleID.isEmpty {
+                    print("🔍 DEBUG: osascript found bundle ID '\(bundleID)' for app '\(appName)'")
+                    return bundleID
+                }
+            }
+        } catch {
+            // If osascript fails, fall back to hardcoded mappings
+            print("🔍 DEBUG: osascript failed for app '\(appName)', using fallback")
+        }
+        
+        // Last resort fallback to known mappings (for safety)
+        let fallbackID: String
+        switch appName {
+        case "TextEdit.app", "TextEdit": fallbackID = "com.apple.TextEdit"
+        case "Claude.app", "Claude": fallbackID = "com.anthropic.claudefordesktop"
+        default: fallbackID = "com.unknown.app" // Will likely fail, but safe
+        }
+        
+        print("🔍 DEBUG: Using fallback bundle ID '\(fallbackID)' for app '\(appName)'")
+        return fallbackID
     }
     
-    static var claudeCodeProcessName: String {
-        return Preferences.claudeCodeProcessName
+    static var targetExecutablePath: String {
+        switch targetExecutable {
+        case "sleep": return "/bin/sleep" // System binary, fixed path
+        case "claude": return findExecutablePath("claude") // Use which-like detection
+        default: return findExecutablePath("claude") // Default to claude
+        }
     }
     
-    static var claudeCodeBinaryPath: String {
-        return Preferences.claudeCodeBinaryPath
+    // Helper function to find executable path using 'which' logic
+    private static func findExecutablePath(_ executableName: String) -> String {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        task.arguments = [executableName]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe() // Suppress error output
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !path.isEmpty {
+                    return path
+                }
+            }
+        } catch {
+            // If which fails, fall back to common locations
+        }
+        
+        // Fallback: check common installation paths
+        let commonPaths = [
+            "\(NSHomeDirectory())/.local/bin/\(executableName)",
+            "/usr/local/bin/\(executableName)",
+            "/opt/homebrew/bin/\(executableName)",
+            "/usr/bin/\(executableName)"
+        ]
+        
+        for path in commonPaths {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        
+        // Last resort: return the name and let system PATH resolve it
+        return executableName
+    }
+    
+    static var targetExecutableName: String {
+        switch targetExecutable {
+        case "sleep": return "sleep"
+        case "claude": return "claude"
+        default: return "claude" // Default to claude
+        }
     }
     
     static let claudeConfigDir = "~/Library/Application Support/Claude"
     static let templatePath = "\(claudeConfigDir)/claude_desktop_config_template.json"
+    // static let outputPath: String "\(claudeConfigDir)/claude_desktop_config_test.json" // Test file for safety
     static let outputPath = "\(claudeConfigDir)/claude_desktop_config_test.json" // Test file for safety
     static let secretsPath = "~/dev/Claude Auto Config/secrets/claude_secrets"
     
     // For compatibility with existing code
-    static let targetBundleID = claudeDesktopBundleID
+    static let targetBundleID = targetAppBundleID
 }
 
 // MARK: - Preferences
@@ -375,18 +474,7 @@ SECRET_TOKEN=your_secret_token_here
         return customDefaults.bool(forKey: "use_adaptive_monitoring")
     }
     
-    // App and binary configuration
-    static var claudeDesktopBundleID: String {
-        return customDefaults.string(forKey: "claude_desktop_bundle_id") ?? "com.apple.TextEdit"
-    }
-    
-    static var claudeCodeProcessName: String {
-        return customDefaults.string(forKey: "claude_code_process_name") ?? "sleep"
-    }
-    
-    static var claudeCodeBinaryPath: String {
-        return customDefaults.string(forKey: "claude_code_binary_path") ?? "/bin/sleep"
-    }
+    // App and binary configuration (removed - Config provides these directly)
     
     // First-run setup
     static var isFirstRun: Bool {
@@ -399,7 +487,7 @@ SECRET_TOKEN=your_secret_token_here
     
     // Helper methods
     static func setDefaults() {
-        let defaults = [
+        let defaults: [String: Any] = [
             // Claude Desktop paths (for testing, we use test file)
             "target_claudedesktop_config_file": Config.outputPath, // claude_desktop_config_test.json for now
             "template_claudedesktop_config_file": Config.templatePath,
@@ -422,10 +510,10 @@ SECRET_TOKEN=your_secret_token_here
             "shareClaudeDesktop_config_withClaudeCode": true,
             "process_monitoring_interval": 1.0,
             
-            // App and binary configuration
-            "claude_desktop_bundle_id": "com.apple.TextEdit", // Test: TextEdit, Prod: com.anthropic.claude-desktop
-            "claude_code_process_name": "sleep", // Test: sleep, Prod: claude
-            "claude_code_binary_path": "/bin/sleep", // Test: /bin/sleep, Prod: /Users/oem/.local/bin/claude
+            // App and binary configuration (using Config values)
+            "target_app_bundle_id": Config.targetAppBundleID,
+            "target_executable_name": Config.targetExecutableName,
+            "target_executable_path": Config.targetExecutablePath,
             
             // First-run setup
             "first_run_done": false,
@@ -835,8 +923,8 @@ class AppMonitor {
     
     private func checkForExistingProcesses() {
         Logger.shared.info("🔍 Checking for existing Claude Code processes on startup...")
-        Logger.shared.info("🔍 DEBUG: Process name to look for: '\(Config.claudeCodeProcessName)'")
-        Logger.shared.info("🔍 DEBUG: Binary path to look for: '\(Config.claudeCodeBinaryPath)'")
+        Logger.shared.info("🔍 DEBUG: Process name to look for: '\(Config.targetExecutableName)'")
+        Logger.shared.info("🔍 DEBUG: Binary path to look for: '\(Config.targetExecutablePath)'")
         
         // Get current running processes
         let currentProcesses = getCurrentClaudeCodeProcesses()
@@ -920,8 +1008,16 @@ class AppMonitor {
     }
     
     @objc private func appDidLaunch(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              app.bundleIdentifier == Config.claudeDesktopBundleID else {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+        
+        let expectedBundleID = Config.targetAppBundleID
+        let actualBundleID = app.bundleIdentifier ?? "nil"
+        
+        Logger.shared.info("🔍 DEBUG: App launched - expected: '\(expectedBundleID)', actual: '\(actualBundleID)'")
+        
+        guard actualBundleID == expectedBundleID else {
             return
         }
         
@@ -979,8 +1075,17 @@ class AppMonitor {
     }
     
     @objc private func appDidTerminate(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              app.bundleIdentifier == Config.targetBundleID else {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+        
+        let expectedBundleID = Config.targetAppBundleID
+        let actualBundleID = app.bundleIdentifier ?? "nil"
+        
+        Logger.shared.info("🔍 DEBUG: App terminated - expected: '\(expectedBundleID)', actual: '\(actualBundleID)'")
+        
+        guard actualBundleID == expectedBundleID else {
+            Logger.shared.info("🔍 DEBUG: Ignoring termination of non-target app: \(actualBundleID)")
             return
         }
         
@@ -1093,7 +1198,7 @@ class AppMonitor {
         }
         
         if !newProcesses.isEmpty {
-            Logger.shared.info("🔍 New \(Config.claudeCodeProcessName) process detected: \(newProcesses)")
+            Logger.shared.info("🔍 New \(Config.targetExecutableName) process detected: \(newProcesses)")
             
             // Check if config file exists
             let outputPath = Preferences.targetClaudeDesktopConfigFile.expandingTildeInPath
@@ -1163,8 +1268,8 @@ class AppMonitor {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
             
-            let binaryPath = Config.claudeCodeBinaryPath
-            let processName = Config.claudeCodeProcessName
+            let binaryPath = Config.targetExecutablePath
+            let processName = Config.targetExecutableName
             
             Logger.shared.info("🔍 DEBUG: getCurrentClaudeCodeProcesses - processName: '\(processName)', binaryPath: '\(binaryPath)'")
             
@@ -1173,14 +1278,10 @@ class AppMonitor {
                 // Testing mode - detect sleep command regardless of path
                 task.arguments = [processName]
                 Logger.shared.info("🔍 DEBUG: Using sleep mode - pgrep arguments: \(task.arguments!)")
-            } else if !binaryPath.isEmpty {
-                // Production mode - use specific binary path for precise detection
-                task.arguments = ["-f", binaryPath]
-                Logger.shared.info("🔍 DEBUG: Using binary path mode - pgrep arguments: \(task.arguments!)")
             } else {
-                // Fallback - pattern match for process name
-                task.arguments = ["-f", processName]
-                Logger.shared.info("🔍 DEBUG: Using fallback mode - pgrep arguments: \(task.arguments!)")
+                // For claude and other executables, use process name
+                task.arguments = [processName]
+                Logger.shared.info("🔍 DEBUG: Using process name mode - pgrep arguments: \(task.arguments!)")
             }
             
             let pipe = Pipe()
@@ -1299,7 +1400,7 @@ class AppMonitor {
     private func isClaudeDesktopRunning() -> Bool {
         let runningApps = workspace.runningApplications
         return runningApps.contains { app in
-            app.bundleIdentifier == Config.claudeDesktopBundleID
+            app.bundleIdentifier == Config.targetAppBundleID
         }
     }
     
@@ -1309,21 +1410,17 @@ class AppMonitor {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
             
-            let binaryPath = Config.claudeCodeBinaryPath
-            let processName = Config.claudeCodeProcessName
+            let binaryPath = Config.targetExecutablePath
+            let processName = Config.targetExecutableName
             
             if processName == "sleep" {
                 // Testing mode - detect sleep command regardless of path
                 task.arguments = [processName]
                 Logger.shared.info("🔍 Checking for sleep processes")
-            } else if !binaryPath.isEmpty {
-                // Production mode - use specific binary path for precise detection
-                task.arguments = ["-f", binaryPath]
-                Logger.shared.info("🔍 Checking for specific binary: \(binaryPath)")
             } else {
-                // Fallback - pattern match for process name
-                task.arguments = ["-f", processName]
-                Logger.shared.info("🔍 Checking for process: \(processName)")
+                // For claude and other executables, use process name
+                task.arguments = [processName]
+                Logger.shared.info("🔍 Checking for process name: \(processName)")
             }
             
             let pipe = Pipe()

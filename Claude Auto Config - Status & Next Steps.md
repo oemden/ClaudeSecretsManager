@@ -120,12 +120,11 @@ for key in requiredKeys {
 - [x] Basic monitoring works
 - [x] Secrets parsing works
 - [x] Template replacement works
-- [ ] Config restoration on quit
-- [ ] Backup original config
-- [ ] Preferences system
+- [x] Backup original config
+- [x] Preferences system
 - [ ] Error recovery
-- [ ] LaunchAgent setup
-- [ ] Production deployment
+- [x] LaunchAgent setup
+- [x] Production deployment
 
 ## 🛠 Useful Commands
 

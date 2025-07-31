@@ -115,9 +115,9 @@ make check    # Verify setup
 - [x] Template file exists
 - [x] Can parse secrets with various formats
 - [x] Template processing replaces placeholders
-- [ ] Output file is created with correct permissions
-- [ ] Original config is backed up
-- [ ] Quit event restores template
+- [x] Output file is created with correct permissions
+- [x] Original config is backed up
+- [ ] Quit event restores template ?? # what is this ??
 
 ## Production Deployment
 

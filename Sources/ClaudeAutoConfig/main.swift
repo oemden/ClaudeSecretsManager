@@ -8,6 +8,12 @@ struct Config {
     static let targetApplication = "Claude.app"     // "TextEdit.app" or "Claude.app"  
     static let targetExecutable = "claude"           // "sleep" or "claude"
     
+    static let claudeConfigDir = "~/Library/Application Support/Claude"
+    static let templatePath = "\(claudeConfigDir)/claude_desktop_config_template.json"
+    // static let outputPath: String "\(claudeConfigDir)/claude_desktop_config_test.json" // Test file for safety
+    static let outputPath = "\(claudeConfigDir)/claude_desktop_config.json" // real file for production use
+    static let secretsPath = "~/.claudeautoconfig/.claude_secrets"
+    
     // Auto-deduce bundle IDs dynamically from app name (cached)
     static var targetAppBundleID: String {
         if _cachedBundleID == nil {
@@ -114,12 +120,6 @@ struct Config {
         default: return "claude" // Default to claude
         }
     }
-    
-    static let claudeConfigDir = "~/Library/Application Support/Claude"
-    static let templatePath = "\(claudeConfigDir)/claude_desktop_config_template.json"
-    // static let outputPath: String "\(claudeConfigDir)/claude_desktop_config_test.json" // Test file for safety
-    static let outputPath = "\(claudeConfigDir)/claude_desktop_config_test.json" // Test file for safety
-    static let secretsPath = "~/dev/Claude Auto Config/secrets/claude_secrets"
     
     // For compatibility with existing code
     static let targetBundleID = targetAppBundleID

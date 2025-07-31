@@ -8,9 +8,16 @@ A macOS daemon that monitors Claude Desktop launch/quit events and automatically
 - ✅ Secrets file parsing (supports `KEY=VALUE` and `export KEY=VALUE`)
 - ✅ Template processing (replaces placeholders with secrets)
 - ✅ File permissions (sets 600 on output)
+- ✅ Preferences management with `defaults`
+- ✅ LaunchAgent setup (complete with dev/prod installation)
+- ✅ Dedicated CLI executable (ClaudeAutoConfigCLI)
+- ✅ Dynamic bundle ID detection using osascript
+- ✅ Dynamic executable path detection using 'which'
+- ✅ Fixed security flaw (secrets loaded on-demand, not cached)
+- ✅ Fixed variable substitution corruption
+- ✅ Fixed false termination detection
+- ✅ Production-ready with Claude Desktop and claude executable
 - 🚧 Restore template on quit
-- 🚧 Preferences management with `defaults`
-- 🚧 LaunchDaemon setup
 - 🚧 Keychain integration (Phase 2)
 
 ## Directory Structure
@@ -19,11 +26,14 @@ A macOS daemon that monitors Claude Desktop launch/quit events and automatically
 ├── Package.swift                 # Swift Package Manager config
 ├── Makefile                      # Build shortcuts
 ├── README.md                     # Documentation
+├── test_install.sh              # Installation script (dev/prod modes)
 ├── check_setup.sh               # Setup verification script
 ├── Sources/
-│   └── ClaudeAutoConfig/
-│       ├── main.swift           # Main monitor logic
-│       └── SecretsParser.swift  # Secrets parsing & template processing
+│   ├── ClaudeAutoConfig/
+│   │   ├── main.swift           # Main daemon executable
+│   │   └── SecretsParser.swift  # Secrets parsing & template processing
+│   └── ClaudeAutoConfigCLI/
+│       └── main.swift           # Dedicated CLI executable
 └── secrets/
     └── claude_secrets           # Secret values file
 ```
@@ -33,10 +43,17 @@ A macOS daemon that monitors Claude Desktop launch/quit events and automatically
 ### Configuration
 ```swift
 struct Config {
-    static let targetBundleID = "com.apple.TextEdit" // Change to "com.anthropic.claude-desktop"
+    // Dynamic configuration - change these two lines to switch apps/executables
+    static let targetApplication = "Claude.app"     // "TextEdit.app" or "Claude.app"  
+    static let targetExecutable = "claude"           // "sleep" or "claude"
+    
+    // Auto-deduce bundle IDs and paths dynamically (cached)
+    static var targetAppBundleID: String { /* osascript detection */ }
+    static var targetExecutablePath: String { /* which detection */ }
+    
     static let claudeConfigDir = "~/Library/Application Support/Claude"
     static let templatePath = "\(claudeConfigDir)/claude_desktop_config_template.json"
-    static let outputPath = "\(claudeConfigDir)/claude_desktop_config_test.json" // Change to claude_desktop_config.json
+    static let outputPath = "\(claudeConfigDir)/claude_desktop_config_test.json"
     static let secretsPath = "~/dev/Claude Auto Config/secrets/claude_secrets"
 }
 ```
@@ -89,25 +106,22 @@ make check    # Verify setup
 
 ### To Fix
 1. Implement template restoration on quit
-2. Add proper backup mechanism
-3. Switch from TextEdit to Claude Desktop monitoring
 
-### To Add
-1. **Preferences with `defaults`**:
-   - secrets_file_path
-   - template_path
-   - backup_enabled
-   - log_level
+### Completed in v0.2.0
+1. ✅ **Dynamic Configuration System**: Two-line change switches between dev/semi-prod/prod
+2. ✅ **Dedicated CLI Executable**: ClaudeAutoConfigCLI for all management tasks
+3. ✅ **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
+4. ✅ **Security Fixes**: On-demand secrets loading, no memory caching
+5. ✅ **Process Detection**: Fixed claude executable detection and false termination
+6. ✅ **LaunchAgent Setup**: Complete dev/prod installation with test_install.sh
 
-2. **LaunchDaemon** for auto-start:
-   ```xml
-   ~/Library/LaunchAgents/com.user.claudeautoconfig.plist
-   ```
-
-3. **Keychain Support** (Phase 2):
+### Next Phase
+1. **Keychain Support** (Phase 2):
    - Service: `com.yourname.claude-auto-config`
    - Account: Variable name
    - Password: Value
+
+2. **Template Restoration**: Restore original config on quit
 
 ## Testing Checklist
 
@@ -121,12 +135,27 @@ make check    # Verify setup
 
 ## Production Deployment
 
-1. Change `targetBundleID` to `"com.anthropic.claude-desktop"`
-2. Change output path from `test.json` to actual config
-3. Implement backup on first run
-4. Create LaunchAgent plist
-5. Code sign for notifications
-6. Test thoroughly with actual Claude Desktop
+✅ **Ready for Production** (v0.2.0):
+1. ✅ Change `targetApplication` to `"Claude.app"` and `targetExecutable` to `"claude"`
+2. ✅ Dynamic bundle ID detection - no hardcoded values
+3. ✅ Dynamic executable path detection - works anywhere claude is installed
+4. ✅ LaunchAgent plist creation and installation
+5. ✅ Complete CLI management interface
+6. ✅ Tested with actual Claude Desktop and claude executable
+
+**Deployment Steps**:
+```bash
+# Set production mode in Sources/ClaudeAutoConfig/main.swift:
+static let targetApplication = "Claude.app"
+static let targetExecutable = "claude"
+
+# Build and install
+swift build -c release
+./test_install.sh prod
+
+# Manage via CLI
+ClaudeAutoConfigCLI --help
+```
 
 ## Debugging Commands
 

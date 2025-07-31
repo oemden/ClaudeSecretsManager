@@ -73,8 +73,10 @@ struct TemplateProcessor {
         print("📏 Template loaded, size: \(content.count) characters")
         
         // Replace all occurrences of secret keys with their values
+        // Sort by key length descending to avoid partial replacements
         var replacementCount = 0
-        for (key, value) in secrets {
+        let sortedSecrets = secrets.sorted { $0.key.count > $1.key.count }
+        for (key, value) in sortedSecrets {
             let originalContent = content
             content = content.replacingOccurrences(of: key, with: value)
             if content != originalContent {
@@ -100,18 +102,25 @@ struct TemplateProcessor {
         print("✅ Wrote processed config to: \(outputURL.path)")
     }
     
-    /// Backup original config if it exists and hasn't been backed up
-    static func backupOriginalIfNeeded(configPath: String) throws {
+    /// Backup original config and create template if they don't exist
+    static func backupOriginalAndCreateTemplate(configPath: String, templatePath: String) throws {
         let configURL = URL(fileURLWithPath: configPath.expandingTildeInPath)
+        let templateURL = URL(fileURLWithPath: templatePath.expandingTildeInPath)
         let backupPath = configURL.deletingLastPathComponent()
             .appendingPathComponent("claudeAutoConfig.firstrun.claude_desktop_config.json.backup")
         
-        // Only backup if original exists and backup doesn't
+        // Only backup if original exists and backup doesn't exist
         if FileManager.default.fileExists(atPath: configURL.path) &&
            !FileManager.default.fileExists(atPath: backupPath.path) {
             
             try FileManager.default.copyItem(at: configURL, to: backupPath)
             print("💾 Created first-run backup at: \(backupPath.path)")
+            
+            // Also create template from the same source
+            if !FileManager.default.fileExists(atPath: templateURL.path) {
+                try FileManager.default.copyItem(at: configURL, to: templateURL)
+                print("📄 Created template from config at: \(templateURL.path)")
+            }
         }
     }
 }

@@ -287,15 +287,22 @@ struct Preferences {
         return validateAndCreateFiles()
     }
     
-    // Validate and auto-create missing files (template, secrets)
+    // Validate and auto-create missing files (backup+template, secrets)
     static func validateAndCreateFiles() -> Bool {
         let templatePath = templateClaudeDesktopConfigFile.expandingTildeInPath
         let secretsPath = secretsFile.expandingTildeInPath
+        let configPath = "\(Config.claudeConfigDir)/claude_desktop_config.json"
         
-        // Check/create template file
+        // Check/create backup and template from existing config
         if !FileManager.default.fileExists(atPath: templatePath) {
-            Logger.shared.info("🔧 Template file missing, creating: \(templatePath)")
-            if !createTemplateFile(at: templatePath) {
+            Logger.shared.info("🔧 Template file missing, attempting backup+template creation")
+            do {
+                try TemplateProcessor.backupOriginalAndCreateTemplate(
+                    configPath: configPath,
+                    templatePath: templateClaudeDesktopConfigFile
+                )
+            } catch {
+                Logger.shared.error("❌ Failed to create backup and template: \(error)")
                 return false
             }
         }
@@ -311,50 +318,6 @@ struct Preferences {
         return true
     }
     
-    // Create template file - copy from existing config.json or create default
-    static func createTemplateFile(at templatePath: String) -> Bool {
-        // Try to copy from existing claude_desktop_config.json first  
-        let existingConfigPath = "\(Config.claudeConfigDir)/claude_desktop_config.json".expandingTildeInPath
-        
-        if FileManager.default.fileExists(atPath: existingConfigPath) {
-            do {
-                try FileManager.default.copyItem(atPath: existingConfigPath, toPath: templatePath)
-                Logger.shared.success("✅ Template created from existing config: \(templatePath)")
-                return true
-            } catch {
-                Logger.shared.warning("⚠️  Failed to copy existing config: \(error)")
-            }
-        }
-        
-        // Create default template
-        let defaultTemplate = """
-{
-  "mcpServers": {
-    "example-server": {
-      "command": "echo",
-      "args": ["Hello from MCP server!"],
-      "env": {
-        "API_KEY": "{{API_KEY}}",
-        "SECRET_TOKEN": "{{SECRET_TOKEN}}"
-      }
-    }
-  }
-}
-"""
-        
-        do {
-            // Create directory if needed
-            let templateDir = URL(fileURLWithPath: templatePath).deletingLastPathComponent().path
-            try FileManager.default.createDirectory(atPath: templateDir, withIntermediateDirectories: true, attributes: nil)
-            
-            try defaultTemplate.write(toFile: templatePath, atomically: true, encoding: .utf8)
-            Logger.shared.success("✅ Default template created: \(templatePath)")
-            return true
-        } catch {
-            Logger.shared.error("❌ Failed to create template: \(error)")
-            return false
-        }
-    }
     
     // Create secrets file with placeholder values
     static func createSecretsFile(at secretsPath: String) -> Bool {
@@ -813,7 +776,6 @@ enum LogLevel: String {
 class AppMonitor {
     let workspace = NSWorkspace.shared
     let notificationCenter: NotificationCenter
-    var secrets: [String: String] = [:]
     var configInjected: Bool = false  // Track if we actually injected a config
     var processMonitorTimer: Timer?  // Timer for periodic process monitoring
     var lastSeenProcesses: Set<String> = []  // Track process IDs we've seen
@@ -849,7 +811,6 @@ class AppMonitor {
         
         Logger.shared.info("🚀 ClaudeAutoConfig started - monitoring Claude Desktop & Claude Code")
         Preferences.printCurrentSettings()
-        loadSecrets()
     }
     
     
@@ -1029,20 +990,20 @@ class AppMonitor {
         runScript(phase: "quit")
     }
     
-    private func loadSecrets() {
+    // MARK: - Shared Template Processing
+    private func loadSecretsAndProcessTemplate(templatePath: String, outputPath: String) throws {
+        // Load secrets fresh from file
         let secretsPath = Preferences.secretsFile
-        Logger.shared.info("🔐 Loading secrets from: \(secretsPath)")
+        Logger.shared.info("🔐 Loading secrets on-demand from: \(secretsPath)")
+        let secrets = try SecretsParser.parseSecretsFile(at: secretsPath)
+        Logger.shared.success("🔐 Loaded \(secrets.count) secrets for template processing")
         
-        do {
-            secrets = try SecretsParser.parseSecretsFile(at: secretsPath)
-            Logger.shared.success("🔐 Loaded \(secrets.count) secrets")
-        } catch {
-            Logger.shared.error("❌ Failed to load secrets: \(error.localizedDescription)")
-            showNotification(
-                title: "Secrets Loading Failed",
-                body: error.localizedDescription
-            )
-        }
+        // Process template with fresh secrets
+        try TemplateProcessor.processTemplate(
+            templatePath: templatePath,
+            outputPath: outputPath,
+            secrets: secrets
+        )
     }
     
     private func runScript(phase: String) {
@@ -1255,12 +1216,7 @@ class AppMonitor {
         Logger.shared.info("💾 Output path: \(outputPath.expandingTildeInPath)")
         
         do {
-            // Process template with secrets
-            try TemplateProcessor.processTemplate(
-                templatePath: templatePath,
-                outputPath: outputPath,
-                secrets: secrets
-            )
+            try loadSecretsAndProcessTemplate(templatePath: templatePath, outputPath: outputPath)
             
             // Mark that we successfully injected config
             configInjected = true
@@ -1470,12 +1426,7 @@ class AppMonitor {
         Logger.shared.info("💾 Output path: \(expandedOutputPath)")
         
         do {
-            // Process template with secrets
-            try TemplateProcessor.processTemplate(
-                templatePath: templatePath,
-                outputPath: outputPath,
-                secrets: secrets
-            )
+            try loadSecretsAndProcessTemplate(templatePath: templatePath, outputPath: outputPath)
             
             // Mark that we successfully injected config
             configInjected = true

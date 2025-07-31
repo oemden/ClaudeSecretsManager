@@ -62,6 +62,54 @@ struct Preferences {
     static var alwaysResetConfigAtLaunch: Bool {
         return customDefaults.bool(forKey: "always_reset_config_at_launch")
     }
+    
+    /// Validate and auto-create missing files (backup+template, secrets)
+    static func validateAndCreateFiles() -> Bool {
+        let templatePath = templateClaudeDesktopConfigFile.expandingTildeInPath
+        let secretsPath = secretsFile.expandingTildeInPath
+        let configPath = "\(SharedConstants.claudeConfigDir)/claude_desktop_config.json"
+        
+        // Check/create backup and template from existing config
+        if !FileManager.default.fileExists(atPath: templatePath) {
+            print("🔧 Template file missing, attempting backup+template creation")
+            do {
+                try TemplateProcessor.backupOriginalAndCreateTemplate(
+                    configPath: configPath,
+                    templatePath: templateClaudeDesktopConfigFile
+                )
+            } catch {
+                print("❌ Failed to create backup and template: \(error)")
+                return false
+            }
+        }
+        
+        // Check/create secrets file  
+        if !FileManager.default.fileExists(atPath: secretsPath) {
+            print("🔧 Secrets file missing, creating default")
+            do {
+                let secretsDir = (secretsPath as NSString).deletingLastPathComponent
+                try FileManager.default.createDirectory(atPath: secretsDir, withIntermediateDirectories: true, attributes: nil)
+                
+                let defaultContent = """
+                    # Claude Auto Config Secrets File
+                    # Format: KEY=VALUE or export KEY=VALUE
+                    # Add your API keys and other secrets here
+                    # Example:
+                    # API_KEY_SECRET=your_actual_api_key_here
+                    # SECRET_TOKEN_SECRET=your_actual_token_here
+                    """
+                
+                try defaultContent.write(toFile: secretsPath, atomically: true, encoding: .utf8)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: secretsPath)
+                print("📄 Created default secrets file at: \(secretsPath)")
+            } catch {
+                print("❌ Failed to create secrets file: \(error)")
+                return false
+            }
+        }
+        
+        return true
+    }
 }
 
 // Copy of SecretsParser needed for CLI
@@ -110,9 +158,112 @@ struct SecretsParser {
     }
 }
 
+// MARK: - Template Processor (copied from daemon for CLI config generation)
+struct TemplateProcessor {
+    
+    /// Process template file with secrets and write output
+    static func processTemplate(
+        templatePath: String,
+        outputPath: String,
+        secrets: [String: String]
+    ) throws {
+        let templateURL = URL(fileURLWithPath: templatePath.expandingTildeInPath)
+        let outputURL = URL(fileURLWithPath: outputPath.expandingTildeInPath)
+        
+        print("🔍 Checking template at: \(templateURL.path)")
+        
+        // Read template
+        guard FileManager.default.fileExists(atPath: templateURL.path) else {
+            throw SecretsError.templateNotFound(templatePath)
+        }
+        
+        var content = try String(contentsOf: templateURL, encoding: .utf8)
+        print("📏 Template loaded, size: \(content.count) characters")
+        
+        // Replace all occurrences of secret keys with their values
+        // Sort by key length descending to avoid partial replacements
+        var replacementCount = 0
+        let sortedSecrets = secrets.sorted { $0.key.count > $1.key.count }
+        for (key, value) in sortedSecrets {
+            let originalContent = content
+            content = content.replacingOccurrences(of: key, with: value)
+            if content != originalContent {
+                replacementCount += 1
+                print("🔄 Replaced \(key) in template")
+            }
+        }
+        print("✅ Made \(replacementCount) replacements")
+        
+        // Create output directory if needed
+        let outputDir = outputURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        
+        // Write output
+        try content.write(to: outputURL, atomically: true, encoding: .utf8)
+        
+        // Set restrictive permissions (600)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: outputURL.path
+        )
+        
+        print("✅ Wrote processed config to: \(outputURL.path)")
+    }
+    
+    /// Backup original config and create template if they don't exist
+    static func backupOriginalAndCreateTemplate(configPath: String, templatePath: String) throws {
+        let configURL = URL(fileURLWithPath: configPath.expandingTildeInPath)
+        let templateURL = URL(fileURLWithPath: templatePath.expandingTildeInPath)
+        let backupPath = configURL.deletingLastPathComponent()
+            .appendingPathComponent("claudeAutoConfig.firstrun.claude_desktop_config.json.backup")
+        
+        // Case 1: Original config exists - create backup and template from it
+        if FileManager.default.fileExists(atPath: configURL.path) &&
+           !FileManager.default.fileExists(atPath: backupPath.path) {
+            
+            try FileManager.default.copyItem(at: configURL, to: backupPath)
+            print("💾 Created first-run backup at: \(backupPath.path)")
+            
+            // Also create template from the same source
+            if !FileManager.default.fileExists(atPath: templateURL.path) {
+                try FileManager.default.copyItem(at: configURL, to: templateURL)
+                print("📄 Created template from config at: \(templateURL.path)")
+            }
+        }
+        // Case 2: No original config exists - create default template
+        else if !FileManager.default.fileExists(atPath: templateURL.path) {
+            print("📄 No existing config found, creating default template at: \(templateURL.path)")
+            
+            let defaultTemplate = """
+{
+  "mcpServers": {
+    "example-server": {
+      "command": "echo",
+      "args": ["Hello from MCP server!"],
+      "env": {
+        "API_KEY": "API_KEY_SECRET",
+        "SECRET_TOKEN": "SECRET_TOKEN_SECRET"
+      }
+    }
+  }
+}
+"""
+            
+            // Create directory if needed
+            let templateDir = templateURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: templateDir, withIntermediateDirectories: true, attributes: nil)
+            
+            // Write default template
+            try defaultTemplate.write(to: templateURL, atomically: true, encoding: .utf8)
+            print("📄 Created default template at: \(templateURL.path)")
+        }
+    }
+}
+
 enum SecretsError: LocalizedError {
     case fileNotFound(String)
     case parseError(String)
+    case templateNotFound(String)
     
     var errorDescription: String? {
         switch self {
@@ -120,6 +271,8 @@ enum SecretsError: LocalizedError {
             return "Secrets file not found: \(path)"
         case .parseError(let message):
             return "Parse error: \(message)"
+        case .templateNotFound(let path):
+            return "Template file not found: \(path)"
         }
     }
 }
@@ -148,6 +301,7 @@ struct CLICommands {
             -l, --list-secrets [file|keychain] List all stored secrets
             -V, --voice [on|off]          Enable/disable voice notifications
             -n, --notifications [on|off]  Enable/disable macOS notifications
+            -j COMMENT                     Specify comment string for keychain entries
         
         COMMANDS:
             -a, --add VAR=VALUE           Add secret(s) to configuration
@@ -157,6 +311,8 @@ struct CLICommands {
                                          Multiple: VAR1,VAR2 or VAR1 VAR2
             -m, --mechanism [file|keychain] Set storage mechanism for secrets
                                          (use with --add/--delete)
+            -g, --generate-config TEMPLATE OUTPUT
+                                         Generate config from template and secrets
             -t, --template                Create template from current Claude config
             -r, --reset                   Reset to default claudesecrets settings
             -I, --install                 Install LaunchAgent plist (doesn't start)
@@ -164,6 +320,8 @@ struct CLICommands {
             -E, --enable                  Enable and start LaunchAgent daemon
             -D, --disable                 Disable and stop LaunchAgent daemon
             -R, --restore                 Restore original Claude config and disable daemon
+            -u, --upgrade                 Transfer keychain ownership to current binary
+                                         (use after installing new build/package)
             --migrate [file-to-keychain] [--emptysecretfile]  
                                          Migrate secrets between storage mechanisms
                                          --emptysecretfile: Empty source file after migration
@@ -173,12 +331,14 @@ struct CLICommands {
         EXAMPLES:
             claudeautoconfig --add API_KEY=abc123 -m file
             claudeautoconfig -a VAR1=val1,VAR2=val2 -m keychain
+            claudeautoconfig -a API_KEY=secret123 -m keychain -j "Production API key"
             claudeautoconfig --delete API_KEY -m file
             claudeautoconfig --voice on
             claudeautoconfig --install
             claudeautoconfig --enable
             claudeautoconfig --status
             claudeautoconfig --disable
+            claudeautoconfig --upgrade
             claudeautoconfig --migrate file-to-keychain
             claudeautoconfig --migrate file-to-keychain --emptysecretfile
             claudeautoconfig --noclaudesecrets
@@ -220,6 +380,7 @@ struct CLICommands {
         
         var i = 0
         var mechanism: String = Preferences.secretsMechanism
+        var customComment: String? = nil
         
         while i < args.count {
             let arg = args[i]
@@ -290,6 +451,15 @@ struct CLICommands {
                     return true
                 }
                 
+            case "-j":
+                if i + 1 < args.count {
+                    customComment = args[i + 1]
+                    i += 1
+                } else {
+                    print("❌ -j requires a comment string")
+                    return true
+                }
+                
             case "-a", "--add":
                 if i + 1 < args.count {
                     // Collect all arguments until next flag or end
@@ -312,7 +482,7 @@ struct CLICommands {
                         allSecrets.merge(secrets) { _, new in new }
                     }
                     
-                    addSecrets(allSecrets, mechanism: mechanism)
+                    addSecrets(allSecrets, mechanism: mechanism, comment: customComment)
                     i = j - 1 // Move index to last processed argument
                 } else {
                     print("❌ --add requires secrets in format: VAR=VALUE or VAR1=VALUE1,VAR2=VALUE2")
@@ -409,6 +579,28 @@ struct CLICommands {
                 wipeAllSecrets()
                 return true
                 
+            case "-u", "--upgrade":
+                upgradeKeychainOwnership()
+                return true
+                
+            case "--check-upgrade-needed":
+                // Check if keychain entries need upgrade, exit with appropriate code
+                // Exit 0: no upgrade needed, Exit 1: upgrade needed, Exit >1: error
+                checkUpgradeNeeded()
+                return true
+                
+            case "-g", "--generate-config":
+                if i + 2 < args.count {
+                    let templatePath = args[i + 1]
+                    let outputPath = args[i + 2]
+                    generateConfig(templatePath: templatePath, outputPath: outputPath)
+                    i += 2
+                } else {
+                    print("❌ --generate-config requires templatePath and outputPath")
+                    return true
+                }
+                return true
+                
             default:
                 print("❌ Unknown argument: \(arg)")
                 print("Run --help for usage information")
@@ -457,13 +649,13 @@ struct CLICommands {
         print("📱 macOS notifications: \(enabled ? "ENABLED" : "DISABLED")")
     }
     
-    static func addSecrets(_ secrets: [String: String], mechanism: String) {
+    static func addSecrets(_ secrets: [String: String], mechanism: String, comment: String? = nil) {
         print("🔐 Processing \(secrets.count) secret(s) using \(mechanism) mechanism...")
         
         if mechanism == "file" {
             addSecretsToFile(secrets)
         } else {
-            addSecretsToKeychain(secrets)
+            addSecretsToKeychain(secrets, comment: comment)
         }
     }
     
@@ -571,18 +763,18 @@ struct CLICommands {
         }
     }
     
-    static func addSecretsToKeychain(_ secrets: [String: String]) {
+    static func addSecretsToKeychain(_ secrets: [String: String], comment: String? = nil) {
         var addedCount = 0
         var modifiedCount = 0
         
         for (key, value) in secrets {
             do {
                 if KeychainManager.exists(account: key) {
-                    try KeychainManager.store(account: key, value: value)
+                    try KeychainManager.store(account: key, value: value, comment: comment)
                     print("  ✅ Modified: \(key)")
                     modifiedCount += 1
                 } else {
-                    try KeychainManager.store(account: key, value: value)
+                    try KeychainManager.store(account: key, value: value, comment: comment)
                     print("  ✅ Added: \(key)")
                     addedCount += 1
                 }
@@ -1276,6 +1468,139 @@ struct CLICommands {
         print("\n🧹 Secret cleanup complete")
         print("   All secrets have been removed from both storage mechanisms")
         print("   Backup files (if any) have been preserved")
+    }
+    
+    /// Generate configuration file from template and secrets
+    static func generateConfig(templatePath: String, outputPath: String) {
+        print("🔄 Generating config from template...")
+        print("📄 Template: \(templatePath)")
+        print("💾 Output: \(outputPath)")
+        
+        // Validate and create missing files (template, secrets) before processing
+        if !Preferences.validateAndCreateFiles() {
+            print("❌ Failed to validate and create required files")
+            exit(1)
+        }
+        
+        do {
+            // Load secrets based on configured mechanism
+            let mechanism = Preferences.secretsMechanism
+            print("🔐 Loading secrets using \(mechanism) mechanism")
+            
+            let secrets: [String: String]
+            
+            if mechanism == "keychain" {
+                secrets = try KeychainManager.listAll()
+                print("🔑 Loaded \(secrets.count) secrets from keychain")
+            } else {
+                // Default to file mechanism
+                let secretsPath = Preferences.secretsFile
+                print("📄 Loading from file: \(secretsPath)")
+                secrets = try SecretsParser.parseSecretsFile(at: secretsPath)
+                print("📄 Loaded \(secrets.count) secrets from file")
+            }
+            
+            // Process template with secrets
+            try TemplateProcessor.processTemplate(
+                templatePath: templatePath,
+                outputPath: outputPath,
+                secrets: secrets
+            )
+            
+            print("✅ Config generation completed successfully")
+            
+        } catch {
+            print("❌ Failed to generate config: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    
+    /// Transfer keychain ownership to current binary (for new builds/packages)
+    static func upgradeKeychainOwnership() {
+        print("🔄 Upgrading keychain ownership to current binary...")
+        
+        do {
+            // 1. Get all existing entries
+            let entries = try KeychainManager.listAll()
+            print("🔍 Found \(entries.count) keychain entries to upgrade")
+            
+            if entries.isEmpty {
+                print("ℹ️  No keychain entries found - nothing to upgrade")
+                return
+            }
+            
+            var successCount = 0
+            var failureCount = 0
+            
+            // 2. Loop through each entry - recreate with new binary ownership + MD5 comment
+            for (key, value) in entries {
+                do {
+                    // 3. Delete old entry (created by previous binary)
+                    try KeychainManager.delete(account: key)
+                    
+                    // 4. Recreate with same values (new binary becomes owner)
+                    //    Note: store() automatically adds MD5+version comment for tracking
+                    try KeychainManager.store(account: key, value: value)
+                    
+                    // 5. Log with obfuscated value (security: never log actual secrets)
+                    let obfuscatedValue = String(repeating: "*", count: min(value.count, 8))
+                    print("  ✅ Upgraded: \(key) = \(obfuscatedValue)... (binary ownership transferred)")
+                    successCount += 1
+                    
+                } catch {
+                    print("  ❌ Failed to upgrade \(key): \(error.localizedDescription)")
+                    failureCount += 1
+                }
+            }
+            
+            // 6. Report results
+            print("\n📊 Upgrade Summary:")
+            print("   ✅ Successfully upgraded: \(successCount)")
+            if failureCount > 0 {
+                print("   ❌ Failed to upgrade: \(failureCount)")
+            }
+            
+            if successCount == entries.count {
+                print("\n🎉 All keychain entries successfully transferred to new binary!")
+                print("   Claude Desktop will now work without keychain prompts")
+            } else if successCount > 0 {
+                print("\n⚠️  Partial upgrade completed")
+                print("   Some entries may still require manual attention")
+            } else {
+                print("\n❌ Upgrade failed for all entries")
+                print("   Check keychain access permissions")
+                exit(1)
+            }
+            
+        } catch {
+            print("❌ Failed to list keychain entries: \(error.localizedDescription)")
+            print("   Make sure the keychain is accessible and not locked")
+            exit(1)
+        }
+    }
+    
+    /// Check if keychain entries need upgrade (used by daemon)
+    /// Exits with code 0 if no upgrade needed, 1 if upgrade needed, >1 for errors
+    static func checkUpgradeNeeded() {
+        do {
+            // Get list of entries that need upgrade
+            let entriesNeedingUpgrade = KeychainManager.getEntriesNeedingUpgrade()
+            
+            if entriesNeedingUpgrade.isEmpty {
+                // No upgrade needed - exit with code 0
+                print("✅ All keychain entries are current")
+                exit(0)
+            } else {
+                // Upgrade needed - exit with code 1
+                print("🔄 Found \(entriesNeedingUpgrade.count) entries needing upgrade")
+                print("   Entries: \(entriesNeedingUpgrade.joined(separator: ", "))")
+                exit(1)
+            }
+        } catch {
+            // Error checking - exit with code 2
+            print("❌ Failed to check keychain status: \(error.localizedDescription)")
+            exit(2)
+        }
     }
 }
 

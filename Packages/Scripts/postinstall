@@ -84,8 +84,14 @@ if [[ -f "/tmp/ClaudeSecretsManager/com.oemden.claudesecrets.plist" ]]; then
     echo "   ✅ LaunchAgent plist installed: $plistPath"
     echo "🚀 Enabling LaunchAgent..."
     # sudo -u "$loggedInUser" launchctl load -w "${PLIST_DEST}"
+    # # ENABLE Agent
+    launchctl enable gui/$userID/com.oemden.claudesecrets                                                                                                                                                                                                                                                                                                                                                                                                               
+    # # LOAD Agent
+    # launchctl bootstrap gui/503 /Users/$loggedInUser/Library/LaunchAgents/com.oemden.claudesecrets.plist                                                                                                                                                                                                                                                                                                                                                            
     launchctl bootstrap gui/$userID "$plistPath"
     # launchctl bootstrap gui/$userID /Users/$loggedInUser/Library/LaunchAgents/com.oemden.claudesecrets.plist
+    # # UNLOAD
+    # launchctl bootout gui/503 /Users/$loggedInUser/Library/LaunchAgents/com.oemden.claudesecrets.plist
 
     echo "   ✅ LaunchAgent enabled and started"
 else

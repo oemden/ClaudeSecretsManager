@@ -4,6 +4,21 @@ import UserNotifications
 import SharedConstants
 import KeychainManager
 
+// MARK: - Errors
+enum ConfigError: LocalizedError {
+    case cliNotFound
+    case cliGenerationFailed(Int32)
+    
+    var errorDescription: String? {
+        switch self {
+        case .cliNotFound:
+            return "CLI executable not found"
+        case .cliGenerationFailed(let exitCode):
+            return "CLI config generation failed with exit code: \(exitCode)"
+        }
+    }
+}
+
 // MARK: - Configuration
 struct Config {
     // Using shared constants
@@ -1339,7 +1354,15 @@ class AppMonitor {
         }
         
         do {
-            try loadSecretsAndProcessTemplate(templatePath: templatePath, outputPath: outputPath)
+            // SILENT KEYCHAIN MIGRATION: Check if keychain entries need upgrade before config generation
+            // This ensures seamless operation after package installation with new binary
+            try performSilentKeychainUpgradeIfNeeded()
+            
+            // KEYCHAIN TEST: Call CLI to generate config instead of doing it in daemon
+            try callCLIToGenerateConfig(templatePath: templatePath, outputPath: outputPath)
+            
+            // ORIGINAL APPROACH (commented for keychain test):
+            // try loadSecretsAndProcessTemplate(templatePath: templatePath, outputPath: outputPath)
             
             // Mark that we successfully injected config
             configInjected = true
@@ -1365,6 +1388,185 @@ class AppMonitor {
         }
     }
     
+    /// KEYCHAIN TEST: Call CLI to generate config (to test keychain permissions)
+    private func callCLIToGenerateConfig(templatePath: String, outputPath: String) throws {
+        Logger.shared.info("🔄 KEYCHAIN TEST: Calling CLI to generate config...")
+        
+        // Find CLI executable path
+        let possibleCLIPaths = [
+            "/usr/local/bin/claudesecrets-cli",
+            "/opt/homebrew/bin/claudesecrets-cli",
+            SharedConstants.defaultBinaryPath.replacingOccurrences(of: "claudesecrets", with: "claudesecrets-cli")
+        ]
+        
+        var cliPath: String?
+        for path in possibleCLIPaths {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                cliPath = path
+                break
+            }
+        }
+        
+        guard let validCLIPath = cliPath else {
+            Logger.shared.error("❌ CLI executable not found at expected paths: \(possibleCLIPaths)")
+            throw ConfigError.cliNotFound
+        }
+        
+        Logger.shared.info("🔍 Using CLI at: \(validCLIPath)")
+        
+        // Call CLI with generate-config
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: validCLIPath)
+        process.arguments = ["-g", templatePath, outputPath]
+        
+        // Capture output for debugging
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        
+        try process.run()
+        process.waitUntilExit()
+        
+        // Log CLI output
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        
+        if let output = String(data: outputData, encoding: .utf8), !output.isEmpty {
+            Logger.shared.info("📄 CLI Output: \(output)")
+        }
+        
+        if let errorOutput = String(data: errorData, encoding: .utf8), !errorOutput.isEmpty {
+            Logger.shared.warning("⚠️  CLI Error: \(errorOutput)")
+        }
+        
+        if process.terminationStatus != 0 {
+            Logger.shared.error("❌ CLI process failed with exit code: \(process.terminationStatus)")
+            throw ConfigError.cliGenerationFailed(process.terminationStatus)
+        }
+        
+        Logger.shared.success("✅ CLI config generation completed successfully")
+    }
+    
+    /// Perform silent keychain upgrade if entries were created by different binary
+    /// 
+    /// This function implements the automatic keychain migration system:
+    /// 1. Checks if any keychain entries were created by a different binary (different MD5)
+    /// 2. If found, silently calls CLI to upgrade keychain ownership
+    /// 3. This runs transparently before config generation to prevent GUI prompts
+    /// 4. Users never notice the migration - it happens in background
+    /// 
+    /// This solves the core issue: macOS keychain only allows the binary that created
+    /// an entry to access it without GUI prompts. When we install a new build/package,
+    /// the binary changes and would trigger prompts. This function prevents that.
+    private func performSilentKeychainUpgradeIfNeeded() throws {
+        // Check if using keychain mechanism (file mechanism doesn't need this)
+        guard Preferences.secretsMechanism == "keychain" else {
+            return
+        }
+        
+        // Check if upgrade is needed by calling CLI (avoids daemon reading keychain directly)
+        // This prevents GUI prompts since CLI can read its own keychain entries
+        let needsUpgrade = try checkIfUpgradeNeeded(cliPath: findCLIPath())
+        
+        // If no entries need upgrade, we're done
+        guard needsUpgrade else {
+            Logger.shared.info("🔍 Keychain entries are current - no upgrade needed")
+            return
+        }
+        
+        Logger.shared.info("🔄 SILENT MIGRATION: Keychain entries need upgrade")
+        
+        let validCLIPath = try findCLIPath()
+        
+        // Call CLI to perform silent upgrade
+        Logger.shared.info("🔧 Performing silent keychain upgrade...")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: validCLIPath)
+        process.arguments = ["-u", "--upgrade"]
+        
+        // Capture output for logging
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        
+        try process.run()
+        process.waitUntilExit()
+        
+        // Log CLI output (for debugging)
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        
+        if let output = String(data: outputData, encoding: .utf8), !output.isEmpty {
+            Logger.shared.info("📄 Upgrade output: \(output)")
+        }
+        
+        if let errorOutput = String(data: errorData, encoding: .utf8), !errorOutput.isEmpty {
+            Logger.shared.warning("⚠️  Upgrade warnings: \(errorOutput)")
+        }
+        
+        if process.terminationStatus == 0 {
+            Logger.shared.success("✅ Silent keychain upgrade completed successfully")
+        } else {
+            Logger.shared.warning("⚠️  Keychain upgrade failed - may see GUI prompts (exit code: \(process.terminationStatus))")
+            // Don't throw error - continue with config generation even if upgrade failed
+        }
+    }
+    
+    /// Find CLI executable path
+    /// - Returns: Path to claudesecrets-cli
+    /// - Throws: ConfigError.cliNotFound if not found
+    private func findCLIPath() throws -> String {
+        let possibleCLIPaths = [
+            "/usr/local/bin/claudesecrets-cli",
+            "/opt/homebrew/bin/claudesecrets-cli",
+            SharedConstants.defaultBinaryPath.replacingOccurrences(of: "claudesecrets", with: "claudesecrets-cli")
+        ]
+        
+        for path in possibleCLIPaths {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        
+        Logger.shared.warning("⚠️  CLI not found at expected paths: \(possibleCLIPaths)")
+        throw ConfigError.cliNotFound
+    }
+    
+    /// Check if keychain upgrade is needed by calling CLI
+    /// This avoids daemon reading keychain directly (which would trigger GUI prompts)
+    /// - Parameter cliPath: Path to CLI executable
+    /// - Returns: true if upgrade needed, false otherwise
+    /// - Throws: ConfigError on CLI execution failure
+    private func checkIfUpgradeNeeded(cliPath: String) throws -> Bool {
+        Logger.shared.info("🔍 Checking if keychain upgrade needed via CLI...")
+        
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: cliPath)
+        process.arguments = ["--check-upgrade-needed"] // New CLI command we need to add
+        
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        
+        try process.run()
+        process.waitUntilExit()
+        
+        // CLI will exit with code 0 if no upgrade needed, 1 if upgrade needed, >1 for errors
+        if process.terminationStatus == 0 {
+            Logger.shared.info("✅ No keychain upgrade needed")
+            return false
+        } else if process.terminationStatus == 1 {
+            Logger.shared.info("🔄 Keychain upgrade needed")
+            return true
+        } else {
+            Logger.shared.error("❌ Failed to check upgrade status (exit code: \(process.terminationStatus))")
+            throw ConfigError.cliGenerationFailed(process.terminationStatus)
+        }
+    }
+
     private func cleanupOrphanedConfig() {
         let outputPath = Preferences.targetClaudeDesktopConfigFile.expandingTildeInPath
         let outputURL = URL(fileURLWithPath: outputPath)
@@ -1545,7 +1747,15 @@ class AppMonitor {
         Logger.shared.info("💾 Output path: \(expandedOutputPath)")
         
         do {
-            try loadSecretsAndProcessTemplate(templatePath: templatePath, outputPath: outputPath)
+            // SILENT KEYCHAIN MIGRATION: Check if keychain entries need upgrade before config generation
+            // This ensures seamless operation after package installation with new binary
+            try performSilentKeychainUpgradeIfNeeded()
+            
+            // KEYCHAIN TEST: Call CLI to generate config instead of doing it in daemon
+            try callCLIToGenerateConfig(templatePath: templatePath, outputPath: outputPath)
+            
+            // ORIGINAL APPROACH (commented for keychain test):
+            // try loadSecretsAndProcessTemplate(templatePath: templatePath, outputPath: outputPath)
             
             // Mark that we successfully injected config
             configInjected = true
@@ -1930,7 +2140,7 @@ struct CLICommands {
         }
     }
     
-    static func addSecrets(_ secrets: [String: String], mechanism: String) {
+    static func addSecrets(_ secrets: [String: String], mechanism: String, comment: String? = nil) {
         print("🔐 Adding \(secrets.count) secret(s) using \(mechanism) mechanism...")
         
         if mechanism == "file" {

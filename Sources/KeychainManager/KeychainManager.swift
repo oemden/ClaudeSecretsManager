@@ -4,6 +4,9 @@
 import Foundation
 import Security
 import SharedConstants
+#if canImport(CommonCrypto)
+import CommonCrypto
+#endif
 
 /// Errors that can occur during keychain operations
 public enum KeychainError: LocalizedError {
@@ -48,25 +51,34 @@ public class KeychainManager {
     /// - Parameters:
     ///   - account: The variable name (e.g., "API_KEY")
     ///   - value: The secret value
+    ///   - comment: Optional comment (defaults to binary MD5 + version)
     /// - Throws: KeychainError on failure
-    public static func store(account: String, value: String) throws {
+    public static func store(account: String, value: String, comment: String? = nil) throws {
         guard let valueData = value.data(using: .utf8) else {
             throw KeychainError.unableToConvertToData
         }
         
+        // Generate default comment with binary MD5 + version if not provided
+        let finalComment = comment ?? generateDefaultComment()
+        
         // Check if item already exists
         if exists(account: account) {
-            try update(account: account, value: value)
+            try update(account: account, value: value, comment: finalComment)
             return
         }
         
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: valueData,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
         ]
+        
+        // Add comment if provided
+        if !finalComment.isEmpty {
+            query[kSecAttrComment as String] = finalComment
+        }
         
         let status = SecItemAdd(query as CFDictionary, nil)
         
@@ -206,14 +218,73 @@ public class KeychainManager {
         }
     }
     
+    /// Get comment for a keychain item
+    /// - Parameter account: The variable name (e.g., "API_KEY")
+    /// - Returns: The comment string, or empty string if none
+    public static func getComment(account: String) -> String {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        guard status == errSecSuccess,
+              let attributes = result as? [String: Any],
+              let comment = attributes[kSecAttrComment as String] as? String else {
+            return ""
+        }
+        
+        return comment
+    }
+    
+    /// Check if keychain entries need upgrade based on binary MD5
+    /// 
+    /// This function implements the core logic for silent keychain migration:
+    /// 1. Each keychain entry stores a comment with the MD5 hash of the binary that created it
+    /// 2. When a new build/package is installed, the binary MD5 changes
+    /// 3. macOS keychain only allows the creating binary to access entries without GUI prompts
+    /// 4. This function identifies entries created by old binaries that need to be recreated
+    /// 5. The daemon uses this to silently upgrade keychain ownership before config generation
+    /// 
+    /// - Returns: Array of account names that need upgrade (empty array if all current)
+    public static func getEntriesNeedingUpgrade() -> [String] {
+        do {
+            // Get MD5 hash of currently running binary
+            let currentMD5 = getCurrentBinaryMD5()
+            
+            // Get all keychain entries managed by Claude Secrets Manager
+            let entries = try listAll()
+            
+            // Check each entry's comment to see if it was created by current binary
+            return entries.keys.compactMap { account in
+                let comment = getComment(account: account)
+                
+                // Check for current binary hash in both old (md5:) and new (sha256:) formats
+                // If comment contains current binary's hash, no upgrade needed (return nil)
+                // If comment is missing or has different hash, upgrade needed (return account name)
+                let hasCurrentHash = comment.contains("md5:\(currentMD5)") || comment.contains("sha256:\(currentMD5)")
+                return hasCurrentHash ? nil : account
+            }
+        } catch {
+            // If we can't read keychain, assume no upgrades needed (fail safe)
+            return []
+        }
+    }
+    
     // MARK: - Private Helper Methods
     
     /// Update an existing keychain item
     /// - Parameters:
     ///   - account: The variable name
     ///   - value: The new secret value
+    ///   - comment: Optional comment to update
     /// - Throws: KeychainError on failure
-    private static func update(account: String, value: String) throws {
+    private static func update(account: String, value: String, comment: String? = nil) throws {
         guard let valueData = value.data(using: .utf8) else {
             throw KeychainError.unableToConvertToData
         }
@@ -224,9 +295,14 @@ public class KeychainManager {
             kSecAttrAccount as String: account
         ]
         
-        let updateFields: [String: Any] = [
+        var updateFields: [String: Any] = [
             kSecValueData as String: valueData
         ]
+        
+        // Add comment if provided
+        if let comment = comment, !comment.isEmpty {
+            updateFields[kSecAttrComment as String] = comment
+        }
         
         let status = SecItemUpdate(query as CFDictionary, updateFields as CFDictionary)
         
@@ -236,6 +312,52 @@ public class KeychainManager {
             }
             throw KeychainError.unexpectedStatus(status)
         }
+    }
+    
+    /// Generate default comment with binary hash and version
+    /// Format: "sha256:a1b2c3d4e5f6... version:0.3.2 created:2025-07-31T22:30:00Z"
+    /// Note: Using sha256 prefix for new entries, but still checking md5: for backward compatibility
+    private static func generateDefaultComment() -> String {
+        let hash = getCurrentBinaryMD5() // Function name kept for compatibility, but returns SHA256
+        let version = SharedConstants.version
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        return "sha256:\(hash) version:\(version) created:\(timestamp)"
+    }
+    
+    /// Get SHA256 hash of currently running binary
+    /// This creates a unique identifier for each build, even with same version number
+    /// Using SHA256 instead of deprecated MD5 for future compatibility
+    private static func getCurrentBinaryMD5() -> String {
+        // Get path to current executable
+        guard let executablePath = Bundle.main.executablePath else {
+            return "unknown"
+        }
+        
+        // Calculate SHA256 hash of the binary file (keeping MD5 name for compatibility)
+        return sha256OfFile(at: executablePath) ?? "unknown"
+    }
+    
+    /// Calculate SHA256 hash of a file
+    /// - Parameter path: File path to hash
+    /// - Returns: SHA256 hash string or nil if failed
+    private static func sha256OfFile(at path: String) -> String? {
+        guard let data = FileManager.default.contents(atPath: path) else {
+            return nil
+        }
+        
+        // Use CommonCrypto for SHA256 calculation (more secure and not deprecated)
+        #if canImport(CommonCrypto)
+        
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        data.withUnsafeBytes { bytes in
+            _ = CC_SHA256(bytes.baseAddress, CC_LONG(data.count), &hash)
+        }
+        
+        return hash.map { String(format: "%02x", $0) }.joined()
+        #else
+        // Fallback for platforms without CommonCrypto
+        return "fallback-\(data.count)-\(path.hash)"
+        #endif
     }
 }
 

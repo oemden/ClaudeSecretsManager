@@ -3,7 +3,7 @@
 ## Overview
 Production-ready macOS daemon that monitors Claude Desktop/Code launches and manages configurations with secure secrets injection. Eliminates plain-text API keys in Claude configs by using dynamic template processing with macOS keychain or encrypted file storage.
 
-### Current Status - v0.4.2 (Production Ready)
+### Current Status - v0.4.3 (Production Ready)
 
 ## TODOs
 - 🚧  **macOS Notifications**: Implement native macOS notification system
@@ -12,6 +12,7 @@ Production-ready macOS daemon that monitors Claude Desktop/Code launches and man
 - 🚧  **config timer**: Set the timer for the config if 'config_timer' is set {ON|OFF}, decide minimal Time - defaults 2h
    - ( WARNING, must only delete the file is noApp is running of course.)
 - 🚧  **Releases**: .dmg or .zip generation and upload to github release.
+- 🚧  **Packages .pkgproj - Apple Developer substitution**: Prepare function or dedicated script to change bundleid and Apple Developper signing in the .pkgproj
 
 ## DONE
 

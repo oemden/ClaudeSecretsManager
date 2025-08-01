@@ -9,7 +9,7 @@ public enum SharedConstants {
     // MARK: - Version Information
     
     /// Application version (updated automatically by build script)
-    public static let version = "0.4.2"
+    public static let version = "0.4.3"
     
     /// Build number (can be used for build identification)
     public static let buildNumber = "1"

@@ -7,14 +7,16 @@ Production-ready macOS daemon that monitors Claude Desktop/Code launches and man
 
 ## TODOs
 - 🚧  **macOS Notifications**: Implement native macOS notification system
-- 🚧  **logs**: Move logs from /tmp to ~/Library/Logs/claudesecrets
+- 🚧  **filebased protection**: Implement claude_secrets encryption ? store encryption Key in Keychain. New mechanism, see how we could claudesecrets -a -E to add value on the fly ( aka decrypt file - add  entry -reencrypt file ?)
 - 🚧  **config timer**: Alow a timer so that the config is not deleted each time Claude Desktop or Claude is Stopped. 'config_timer_allow' {ON|OFF} - defaults OFF.
 - 🚧  **config timer**: Set the timer for the config if 'config_timer' is set {ON|OFF}, decide minimal Time - defaults 2h
    - ( WARNING, must only delete the file is noApp is running of course.)
+- 🚧  **Releases**: .dmg or .zip generation and upload to github release.
 
 ## DONE
 
 ### Core Functionality ✅
+- ✅  **logs**: Move logs from /tmp to ~/Library/Logs/claudesecrets
 - ✅  **App Monitoring**: Works with both Claude Desktop and TextEdit (dynamic detection)
 - ✅  **Executable Monitoring**: Works with both claude and sleep processes (dynamic detection)  
 - ✅  **Secrets Parser**: Handles `KEY=VALUE`, `export KEY=VALUE`, and nested `KEY=VAR=VALUE`
@@ -23,7 +25,6 @@ Production-ready macOS daemon that monitors Claude Desktop/Code launches and man
 - ✅  **Voice Feedback**: "Configuration injected" on launch, "Configuration cleaned" on quit
 - ✅  **Debug Output**: Clear console logging of all operations
 - ✅  **CLI Management**: Dedicated Claude Secrets ManagerCLI executable for all management tasks
-- ✅  **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
 - ✅  **LaunchAgent**: Complete dev/prod installation with test_install.sh - Production ready
 
 ### Major Fixes Completed in v0.2.0 ✅
@@ -34,13 +35,13 @@ Production-ready macOS daemon that monitors Claude Desktop/Code launches and man
 - ✅  **Dynamic Configuration**: Two-line change switches between dev/semi-prod/prod modes
 
 ### Completed in v0.2.0 ✅
-- ✅ **Dynamic Configuration System**: Change 2 lines to switch between dev/semi-prod/prod
-- ✅ **Dedicated CLI Executable**: Claude Secrets ManagerCLI handles all management tasks
-- ✅ **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
-- ✅ **Security Overhaul**: On-demand secrets loading, eliminated memory caching
+- ✅ **Dynamic Configuration for testing**: Change MYENV={dev|prod} test_install.sh  to switch between dev: `/usr/dev/bin` ( no `sudo` ) to prod: `/usr/local/bin` ( needs `sudo` ) when testing.
+- ✅ **Complete LaunchAgent**: Dev/prod installation with test_install.sh update the laucnhd plist accordingly
+- ✅ **Dedicated CLI Executable**: Claude Secrets ManagerCLI handles all management tasks including Keychain actions
+- ✅ **Dynamic Detection**: Monitor **Claude Desktop Application** via (Bundle IDs via osascript), and **Claude Code executable** via 'which'
 - ✅ **Fixed Process Detection**: Claude executable detection and false termination
-- ✅ **Complete LaunchAgent**: Dev/prod installation with test_install.sh
-- ✅ **Production Ready**: Works with actual Claude Desktop and claude executable
+- ✅ **Security Overhaul**: On-demand secrets loading, eliminated memory caching aka Secrets loaded Once in daemon memory, bad for Security and secrets Updates.
+- ✅ **Production Ready**: Works with actual **Claude Desktop (Claude.app)** and **Claude Code executable (claude)**
 
 ### Recent v0.4.2 Enhancements ✅
 - ✅ **Secure Storage**: File-based or macOS Keychain secrets storage
@@ -55,17 +56,16 @@ Production-ready macOS daemon that monitors Claude Desktop/Code launches and man
 - ✅ **Bulk Import**: Import secrets from external files with `--migrate --file`
 - ✅ **Intelligent Logging**: 3-level logging system (minimal/normal/debug) with preference control
 - ✅ **Package Installer**: Complete `.pkg` installer with pre/post-install automation
-- ✅ **Enterprise Security**: Random key generation, service isolation, comprehensive error handling
+- ✅ **Enterprise Security**: Random export-import key generation, service isolation, comprehensive error handling
+- ✅ **Security Hardening**: Service isolation, random key generation for the upgrade ( export - import KEY(s)=VALUE(s) during upgrade )
 - ✅ **Keychain Integration**: Secure macOS keychain storage (DONE)
 - ✅ **Logging Options**: Fixed and working correctly (DONE)
 - ✅ **LaunchDaemon**: Using launchd integration (DONE)
 - ✅ **Install Scripts**: test_install and uninstall scripts for dev vs prod (DONE)
 - ✅ **Build & Package**: build-and-package scripts working (DONE)
 - ✅ **Package Releases**: Packages project for .pkg releases (DONE)
-- ✅  **Silent Daemon**: `daemon_console` preference controls console output
-- ✅  **Intelligent Logging**: Separate error logs, filtered message levels
-- ✅  **Security Hardening**: Service isolation, random key generation
-- ✅  **Package Robustness**: XCreds-pattern installation, comprehensive error handling
+- ✅ **Silent Daemon**: `daemon_console` preference controls console output
+- ✅ **Intelligent Logging**: Separate error logs, filtered message levels
 
 ## Technical Architecture
 
@@ -82,8 +82,10 @@ Production-ready macOS daemon that monitors Claude Desktop/Code launches and man
 - ✅  **Key Settings**: `log_level`, `daemon_console`, `secrets_mechanism`
 
 ### Process Flow
-1. Claude launch detected → Load secrets → Process template → Write config
-2. Claude quit detected → Cleanup config
+1. Claude (Desktop or Code) launch detected → neither Claude (Code or Desktop) is running → Load secrets → Process template → Write config
+2. Claude (Desktop or Code) quit detected → Claude (Code or Desktop) still running → Keep config
+3. Claude (Desktop or Code) quit detected → neither Claude (Code or Desktop) is running → Cleanup config
+4. Neither Claude (Desktop or Code) are running → config exist → Cleanup config
 
 ## Development Notes
 

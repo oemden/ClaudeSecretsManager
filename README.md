@@ -1,12 +1,23 @@
 # Claude Secrets Manager v0.4.2
 
-A production-ready macOS daemon that automatically manages Claude Desktop/Code configurations with secure secrets injection. Never put API keys directly in your Claude config again - use the macOS keychain or secure files instead.
+<img src="./Pictures/ClaudeSecretsManager.png" width="256" height="256">
+
+A production-ready macOS daemon that automatically manages Claude Desktop/Code configurations with secure secrets injection.
+
+Never put API keys directly in your Claude config again - use the macOS keychain or secure files instead.
+
+For now the .claude_secrets is in clear, but at least it is a single place to manage secrets. I intend to see iof I can do some encryption-decryption oif the file.
+If you want real secured secrets, they set --mechanism to Keychain rather than file.
 
 ## What It Does
 
-**The Problem**: Claude Desktop/Code configs contain sensitive API keys and tokens in plain text JSON files.
+**The Problem**: 
+- Claude Desktop/Code configs contain sensitive API keys and tokens in plain text JSON files.
 
-**The Solution**: This daemon monitors when Claude launches, dynamically injects secrets from secure storage (keychain/files), and cleans up when Claude quits. Your sensitive data stays protected while Claude gets the config it needs.
+**The Solution**: 
+- This daemon monitors when Claude launches, dynamically injects secrets from secure storage (keychain/files), and cleans up when Claude quits. 
+  
+  Your sensitive data stays protected while Claude gets the config it needs.
 
 ## Project Goals
 
@@ -18,12 +29,12 @@ A production-ready macOS daemon that automatically manages Claude Desktop/Code c
 
 **Tested with**: 
 - **Claude Desktop Version: "0.12.55"**
-- **Claude Code Version: "1.0.65"**
+- **Claude Code Version: "3.44"**
 - **macOS Version: "macOS 15.5"**
 
-**⚠️ Always backup your configs - built-in backup system protects against data loss**
+**⚠️ Always backup your configs - even if the built-in backup system should protect against data loss at first run/install**
 
-## 🚀 What's New in v0.4.2 (November 2024)
+## 🚀 What's New in version 0.4.3 (August 2025)
 
 **Major Breakthrough**: Keychain GUI prompts eliminated! Package upgrades now seamlessly preserve all keychain secrets without user intervention.
 
@@ -31,14 +42,17 @@ A production-ready macOS daemon that automatically manages Claude Desktop/Code c
 - **🔐 Seamless Package Upgrades**: AES-256-CBC encrypted export/import system eliminates keychain ownership issues during installation
 - **📦 Bulk Import Operations**: `--migrate --file` command for importing secrets from external files
 - **🔧 Intelligent Logging**: 3-level system (minimal/normal/debug) dramatically reduces log noise while maintaining debugging capability
-- **🛡️ Enterprise Security**: Random key generation with OpenSSL, service isolation, comprehensive error recovery
+- **🛡️ Enterprise Security**: Random key generation with OpenSSL to export-import Keychain records, service isolation, error log
 - **📊 Production Package**: Complete `.pkg` installer with automated pre/post-install scripts and certificate signing
 
 ### Technical Improvements:
-- **EncryptionManager**: AES-256-CBC with 16-byte IV and PBKDF2 key derivation
-- **Service Isolation**: Separate `claudesecretsupgradekey` service prevents keychain conflicts
+- **EncryptionManager**: AES-256-CBC with 16-byte IV and PBKDF2 key derivation for the export import Keychain KEY=VALUE during an upgrade. 
+  - It is Mandatory to export/import existing Keychain records at each Binary change (updates) otherwise macOS will prompt for user's password for each Key in the GUI and will attempt to do it 3 times per Keychain record.
+- **Service Isolation**: Separate `claudesecretsupgradekey` service prevents keychain conflicts.
+  - This is the temporary encryption key set to encrypt the export file during migration. deleted after importing.
 - **Logger System**: Preference-controlled verbosity with immediate effect
-- **Package Scripts**: XCreds-pattern installation with robust user detection and error handling
+- **Package Scripts**: pre|post installation scripts for basic checks and preparing files
+  - Backup of actual json Claude config, and existing files like template and .claude_secrets if they exist. Include the export-import of Keychain records.
 
 ### Achievements and TODOs
 
@@ -95,6 +109,11 @@ claudesecrets-cli -u, --upgrade                  # Transfer keychain ownership t
 claudesecrets-cli --migrate file-to-keychain      # Move secrets to keychain
 claudesecrets-cli --migrate file-to-keychain --emptysecretfile  # Move and empty source file
 claudesecrets-cli --migrate --file /path/secrets  # Bulk import from file
+                                                  # create a file with:
+                                                  #   KEY01=VALUE01
+                                                  #   KEY02=TOKEN02
+                                                  #   KEY03=1234$=
+                                                  # you can then bulk import multiples secrets ( do not forget to delete the file )
 
 # Emergency Commands
 claudesecrets-cli --noclaudesecrets              # Emergency disable: stop daemon, restore config
@@ -102,6 +121,9 @@ claudesecrets-cli --wipesecrets                  # Delete ALL secrets from both 
 ```
 
 ### Handling Complex Values
+
+Not heavily tested, you may need to adjust escaping etc. Normally what you've set in your JSON should the VALUE of your KEY.
+
 ```bash
 # COMPLEX VALUES (use single quotes to protect special characters):
 claudesecrets-cli -a 'API_URL=https://api.example.com/v1' -m file

@@ -1,182 +1,172 @@
-# Claude Secrets Manager - Project Summary
+# Claude Secret Manager - Project Summary
 
 ## Overview
-A macOS daemon that monitors Claude Desktop launch/quit events and automatically manages configuration files with secrets injection. Currently testing with TextEdit.app before switching to Claude Desktop.
+Production-ready macOS daemon that monitors Claude Desktop/Code launches and manages configurations with secure secrets injection. Eliminates plain-text API keys in Claude configs by using dynamic template processing with macOS keychain or encrypted file storage.
 
-## Project Status
-- ✅ App monitoring (launch/quit detection)
-- ✅ Secrets file parsing (supports `KEY=VALUE` and `export KEY=VALUE`)
-- ✅ Template processing (replaces placeholders with secrets)
-- ✅ File permissions (sets 600 on output)
-- ✅ Preferences management with `defaults`
-- ✅ LaunchAgent setup (complete with dev/prod installation)
-- ✅ Dedicated CLI executable (Claude Secrets ManagerCLI)
-- ✅ Dynamic bundle ID detection using osascript
-- ✅ Dynamic executable path detection using 'which'
-- ✅ Fixed security flaw (secrets loaded on-demand, not cached)
-- ✅ Fixed variable substitution corruption
-- ✅ Fixed false termination detection
-- ✅ Production-ready with Claude Desktop and claude executable
-- ✅ Keychain integration (Phase 2)
-- ✅ Prepare Packages .pkgproj
-- ✅ Create a buil-and-package.sh script to run build and cretae distribution package signed .pkg, also sign binaries in the process.
+### Current Status - v0.4.2 (Production Ready)
 
-## Directory Structure
+## TODOs
+- 🚧  **macOS Notifications**: Implement native macOS notification system
+- 🚧  **logs**: Move logs from /tmp to ~/Library/Logs/claudesecrets
+- 🚧  **config timer**: Alow a timer so that the config is not deleted each time Claude Desktop or Claude is Stopped. 'config_timer_allow' {ON|OFF} - defaults OFF.
+- 🚧  **config timer**: Set the timer for the config if 'config_timer' is set {ON|OFF}, decide minimal Time - defaults 2h
+   - ( WARNING, must only delete the file is noApp is running of course.)
+
+## DONE
+
+### Core Functionality ✅
+- ✅  **App Monitoring**: Works with both Claude Desktop and TextEdit (dynamic detection)
+- ✅  **Executable Monitoring**: Works with both claude and sleep processes (dynamic detection)  
+- ✅  **Secrets Parser**: Handles `KEY=VALUE`, `export KEY=VALUE`, and nested `KEY=VAR=VALUE`
+- ✅  **Template Processing**: Successfully replaces placeholders with secrets (fixed corruption bug)
+- ✅  **File Permissions**: Sets 600 on output files
+- ✅  **Voice Feedback**: "Configuration injected" on launch, "Configuration cleaned" on quit
+- ✅  **Debug Output**: Clear console logging of all operations
+- ✅  **CLI Management**: Dedicated Claude Secrets ManagerCLI executable for all management tasks
+- ✅  **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
+- ✅  **LaunchAgent**: Complete dev/prod installation with test_install.sh - Production ready
+
+### Major Fixes Completed in v0.2.0 ✅
+- ✅  **Security**: Fixed cached secrets flaw - now loaded on-demand only
+- ✅  **Variable Substitution**: Fixed corruption by sorting secrets by key length
+- ✅  **Process Detection**: Fixed claude executable detection with simplified pgrep
+- ✅  **False Termination**: Fixed spurious termination events causing config deletion
+- ✅  **Dynamic Configuration**: Two-line change switches between dev/semi-prod/prod modes
+
+### Completed in v0.2.0 ✅
+- ✅ **Dynamic Configuration System**: Change 2 lines to switch between dev/semi-prod/prod
+- ✅ **Dedicated CLI Executable**: Claude Secrets ManagerCLI handles all management tasks
+- ✅ **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
+- ✅ **Security Overhaul**: On-demand secrets loading, eliminated memory caching
+- ✅ **Fixed Process Detection**: Claude executable detection and false termination
+- ✅ **Complete LaunchAgent**: Dev/prod installation with test_install.sh
+- ✅ **Production Ready**: Works with actual Claude Desktop and claude executable
+
+### Recent v0.4.2 Enhancements ✅
+- ✅ **Secure Storage**: File-based or macOS Keychain secrets storage
+- ✅ **Process Monitoring**: Detects Claude Desktop & Claude Code launch/quit
+- ✅ **Dynamic Config**: On-the-fly configuration generation with variable substitution
+- ✅ **Template System**: Uses template files with placeholder variables
+- ✅ **CLI Management**: Full command-line interface for secrets management
+- ✅ **LaunchAgent**: Automatic startup and background operation
+- ✅ **Backup System**: Automatic config backup on first run
+- ✅ **Dual Mechanism**: Switch between file and keychain storage seamlessly
+- ✅ **Seamless Upgrades**: AES-256-CBC encrypted export/import for package installations
+- ✅ **Bulk Import**: Import secrets from external files with `--migrate --file`
+- ✅ **Intelligent Logging**: 3-level logging system (minimal/normal/debug) with preference control
+- ✅ **Package Installer**: Complete `.pkg` installer with pre/post-install automation
+- ✅ **Enterprise Security**: Random key generation, service isolation, comprehensive error handling
+- ✅ **Keychain Integration**: Secure macOS keychain storage (DONE)
+- ✅ **Logging Options**: Fixed and working correctly (DONE)
+- ✅ **LaunchDaemon**: Using launchd integration (DONE)
+- ✅ **Install Scripts**: test_install and uninstall scripts for dev vs prod (DONE)
+- ✅ **Build & Package**: build-and-package scripts working (DONE)
+- ✅ **Package Releases**: Packages project for .pkg releases (DONE)
+- ✅  **Silent Daemon**: `daemon_console` preference controls console output
+- ✅  **Intelligent Logging**: Separate error logs, filtered message levels
+- ✅  **Security Hardening**: Service isolation, random key generation
+- ✅  **Package Robustness**: XCreds-pattern installation, comprehensive error handling
+
+## Technical Architecture
+
+### Executables
+- ✅  **`claudesecrets`**: Background daemon (process monitoring, config management)
+- ✅  **`claudesecrets-cli`**: Management interface (secrets, preferences, migration)
+
+### Storage
+- ✅  **Keychain**: Secure macOS keychain integration (recommended)
+- ✅  **File**: Encrypted file storage with 600 permissions
+
+### Preferences Domain
+- ✅  **`com.oemden.claudesecrets`**: All settings stored in macOS preferences
+- ✅  **Key Settings**: `log_level`, `daemon_console`, `secrets_mechanism`
+
+### Process Flow
+1. Claude launch detected → Load secrets → Process template → Write config
+2. Claude quit detected → Cleanup config
+
+## Development Notes
+
+### Logging Levels
+- ✅  **0 (minimal)**: Essential operations (launches, completions, warnings)
+- ✅  **1 (normal)**: Operational details (paths, notifications, steps)  
+- ✅  **2 (debug)**: Internal debugging (process monitoring, detailed operations)
+
+### Security Model
+- ✅  Secrets never cached in memory
+- ✅  On-demand loading during config generation
+- ✅  Separate error logging to prevent sensitive data leakage
+- ✅  Proper file permissions and ownership
+
+## Directory Structure (v0.4.2)
 ```
-~/dev/Claude Secrets Manager/
-├── Package.swift                 # Swift Package Manager config
-├── Makefile                      # Build shortcuts
-├── README.md                     # Documentation
-├── test_install.sh              # Installation script (dev/prod modes)
-├── check_setup.sh               # Setup verification script
+~/dev/Claude Auto Config/
+├── Package.swift                    # Swift Package Manager config
+├── Makefile                         # Build shortcuts  
+├── README.md                        # User documentation
+├── CLAUDE.md                        # Development context
+├── build-and-package.sh            # Complete build and package script
 ├── Sources/
-│   ├── Claude Secrets Manager/
-│   │   ├── main.swift           # Main daemon executable
-│   │   └── SecretsParser.swift  # Secrets parsing & template processing
-│   └── Claude Secrets ManagerCLI/
-│       └── main.swift           # Dedicated CLI executable
-└── secrets/
-    └── claude_secrets           # Secret values file
+│   ├── ClaudeSecrets/              # Main daemon
+│   │   ├── main.swift
+│   │   └── SecretsParser.swift
+│   ├── ClaudeSecretsCLI/           # CLI tool
+│   │   └── main.swift
+│   ├── KeychainManager/            # Keychain integration
+│   │   └── KeychainManager.swift
+│   └── SharedConstants/            # Shared configuration
+│       └── SharedConstants.swift
+├── LaunchAgent/
+│   └── com.oemden.claudesecrets.plist
+├── Packages/                        # Installer package
+│   ├── ClaudeSecretsManager.pkgproj
+│   └── Scripts/
+│       ├── preinstall               # Export keychain, backup
+│       └── postinstall              # Import keychain, configure
+└── Tests/                           # Development scripts
+    ├── test_install.sh
+    └── test_uninstall.sh
 ```
 
-## Key Files & Paths
+## Technical Architecture
 
-### Configuration
-```swift
-struct Config {
-    // Dynamic configuration - change these two lines to switch apps/executables
-    static let targetApplication = "Claude.app"     // "TextEdit.app" or "Claude.app"  
-    static let targetExecutable = "claude"           // "sleep" or "claude"
-    
-    // Auto-deduce bundle IDs and paths dynamically (cached)
-    static var targetAppBundleID: String { /* osascript detection */ }
-    static var targetExecutablePath: String { /* which detection */ }
-    
-    static let claudeConfigDir = "~/Library/Application Support/Claude"
-    static let templatePath = "\(claudeConfigDir)/claude_desktop_config_template.json"
-    static let outputPath = "\(claudeConfigDir)/claude_desktop_config_test.json"
-    static let secretsPath = "~/dev/Claude Secrets Manager/secrets/claude_secrets"
-}
-```
+### Process Flow
+1. **Launch Detection**: Claude starts → daemon detects process
+2. **Secret Loading**: From keychain or file storage  
+3. **Template Processing**: Variables replaced with secrets
+4. **Config Generation**: Final config written to Claude's location
+5. **Cleanup**: Config removed when Claude quits (optional)
 
-### Required Files
-1. **Template**: `~/Library/Application Support/Claude/claude_desktop_config_template.json`
-2. **Secrets**: `~/dev/Claude Secrets Manager/secrets/claude_secrets`
-3. **Output**: `~/Library/Application Support/Claude/claude_desktop_config_test.json`
+### Security Model
+- **No Caching**: Secrets loaded on-demand, never stored in memory
+- **Encryption**: AES-256-CBC for temporary data during upgrades
+- **Permissions**: 600 for secrets, 644 for configs, proper ownership
+- **Isolation**: Separate services for upgrade operations
 
-## Secrets File Format
+### Preferences System
+Domain: `com.oemden.claudesecrets`
+- **`log_level`**: 0=minimal, 1=normal, 2=debug
+- **`daemon_console`**: Console output control (default: false)
+- **`secrets_mechanism`**: "keychain" or "file"
+
+## Recent Enhancements (v0.4.2)
+- **Silent Operation**: Daemon console output controllable via preferences
+- **Enhanced Logging**: Separate error logs, intelligent message filtering
+- **Package Robustness**: XCreds-pattern installation with comprehensive error handling
+- **Security Hardening**: Service isolation, random key generation
+
+## Quick Commands
 ```bash
-# Claude Secrets Manager Secrets File
-# Format: KEY=VALUE or export KEY=VALUE
+# Add secrets
+claudesecrets-cli -a API_KEY=value
 
-# Basic format
-SIMPLE_KEY=simple_value
+# Control logging  
+claudesecrets-cli -L minimal
+claudesecrets-cli --daemon-console off
 
-# Export format (optional)
-export ANOTHER_KEY=another_value
-
-# Nested values (for MCP requirements)
-AUTOPWPMCP_AUTH_TOKEN=AUTH_TOKEN=XYZ0987654321
-NOTION_MCP_NOTION_TOKEN=NOTION_TOKEN=ntn_1234567890
+# Migration
+claudesecrets-cli --migrate file-to-keychain
+claudesecrets-cli --migrate --file /path/to/secrets
 ```
 
-## How It Works
-
-1. **Monitor starts** → Loads secrets from file
-2. **App launches** → Reads template, replaces placeholders with secrets, writes config
-3. **App quits** → Restores template (removes secrets from disk)
-
-## Building & Running
-
-### Using Xcode (Recommended)
-```bash
-cd ~/dev/Claude\ Auto\ Config
-open Package.swift
-# Press ⌘+R to run
-```
-
-### Using Terminal
-```bash
-cd ~/dev/Claude\ Auto\ Config
-make build    # Build release version
-make test     # Run with TextEdit monitoring
-make check    # Verify setup
-```
-
-## Current Issues & Next Steps
-
-### To Fix
-1. Implement template restoration on quit
-
-### Completed in v0.2.0
-1. ✅ **Dynamic Configuration System**: Two-line change switches between dev/semi-prod/prod
-2. ✅ **Dedicated CLI Executable**: Claude Secrets ManagerCLI for all management tasks
-3. ✅ **Dynamic Detection**: Bundle IDs via osascript, executable paths via 'which'
-4. ✅ **Security Fixes**: On-demand secrets loading, no memory caching
-5. ✅ **Process Detection**: Fixed claude executable detection and false termination
-6. ✅ **LaunchAgent Setup**: Complete dev/prod installation with test_install.sh
-
-### Next Phase
-1. **Keychain Support** (Phase 2):
-   - Service: `com.yourname.claude-auto-config`
-   - Account: Variable name
-   - Password: Value
-
-2. **Template Restoration**: Restore original config on quit
-
-## Testing Checklist
-
-- [x] Secrets file exists and is readable
-- [x] Template file exists
-- [x] Can parse secrets with various formats
-- [x] Template processing replaces placeholders
-- [x] Output file is created with correct permissions
-- [x] Original config is backed up
-- [ ] Quit event restores template ?? # what is this ??
-
-## Production Deployment
-
-✅ **Ready for Production** (v0.2.0):
-1. ✅ Change `targetApplication` to `"Claude.app"` and `targetExecutable` to `"claude"`
-2. ✅ Dynamic bundle ID detection - no hardcoded values
-3. ✅ Dynamic executable path detection - works anywhere claude is installed
-4. ✅ LaunchAgent plist creation and installation
-5. ✅ Complete CLI management interface
-6. ✅ Tested with actual Claude Desktop and claude executable
-
-**Deployment Steps**:
-```bash
-# Set production mode in Sources/Claude Secrets Manager/main.swift:
-static let targetApplication = "Claude.app"
-static let targetExecutable = "claude"
-
-# Build and install
-swift build -c release
-./test_install.sh prod
-
-# Manage via CLI
-Claude Secrets ManagerCLI --help
-```
-
-## Debugging Commands
-
-```bash
-# Check if files exist
-make check
-
-# Watch console output
-make test
-
-# Check generated config
-cat ~/Library/Application\ Support/Claude/claude_desktop_config_test.json
-
-# Monitor system logs
-log stream --predicate 'process == "Claude Secrets Manager"'
-```
-
-## Security Notes
-
-- Secrets file has user-only permissions (recommended: chmod 600)
-- Output config is set to 600 permissions automatically
-- Template should not contain actual secrets
-- Consider encrypting secrets file in production
+Project provides enterprise-grade secrets management for Claude configurations while maintaining ease of use for individual developers.

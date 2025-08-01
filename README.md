@@ -1,19 +1,26 @@
 # Claude Secrets Manager v0.4.2
 
-A production-ready macOS daemon that monitors Claude Desktop/Code launch events and manages configuration with secure secrets injection. Features seamless keychain integration, encrypted package upgrades, and intelligent logging. This project enables vibe coding while maintaining enterprise-grade security for secrets management.
+A production-ready macOS daemon that automatically manages Claude Desktop/Code configurations with secure secrets injection. Never put API keys directly in your Claude config again - use the macOS keychain or secure files instead.
 
-## Project Goal
+## What It Does
 
-This project is a way to use vibe coding and deal with secrets management for Claude config. It annoyed me to put all secrets, passwords and tokens directly in the JSON Claude config. While there is a file mechanism, the goal is to use the macOS keychain for secure storage. I have not found other ways than to detect if Claude Desktop or Claude Code are running and create the config on the fly with variable substitution - surely there is a better way.
+**The Problem**: Claude Desktop/Code configs contain sensitive API keys and tokens in plain text JSON files.
 
-As of now it seems that Claude Desktop and Code share the JSON config, yet there are preference keys ready in case that changes in the future.
+**The Solution**: This daemon monitors when Claude launches, dynamically injects secrets from secure storage (keychain/files), and cleans up when Claude quits. Your sensitive data stays protected while Claude gets the config it needs.
 
-As of now I have not dealt with complex strings and how they are handled in a JSON file, but my few tests proved to be working.
+## Project Goals
 
-- Claude Code: 1.0.64 (Claude Code)
-- Claude Desktop: Claude 0.12.55 (d55c63)
+- **Secure Secrets**: Store API keys in macOS keychain or encrypted files, not plain text configs
+- **Dynamic Injection**: Generate configs on-the-fly when Claude launches, remove when it quits  
+- **Zero Maintenance**: Runs silently in background, requires no manual intervention
+- **Backup Safety**: Automatic backups ensure configs are never lost
+- **Production Ready**: Complete package installer with upgrade preservation
 
-**⚠️ This is a side project - use at your own risk and ALWAYS BACKUP your config files before using the tool, although there is a built-in config backup at first run and installation process.**
+**Tested with**: 
+- Claude Desktop Version: "0.12.55"
+- Claude Code Version: "1.0.65"
+
+**⚠️ Always backup your configs - built-in backup system protects against data loss**
 
 ## 🚀 What's New in v0.4.2 (November 2024)
 
@@ -31,6 +38,59 @@ As of now I have not dealt with complex strings and how they are handled in a JS
 - **Service Isolation**: Separate `claudesecretsupgradekey` service prevents keychain conflicts
 - **Logger System**: Preference-controlled verbosity with immediate effect
 - **Package Scripts**: XCreds-pattern installation with robust user detection and error handling
+
+## Usage
+
+### CLI Commands
+```bash
+# Secrets Management
+claudesecrets-cli -a API_KEY=your_secret_value    # Add secret
+claudesecrets-cli -l keychain                     # List keychain secrets
+claudesecrets-cli -l file                         # List file secrets
+claudesecrets-cli -d API_KEY                      # Delete secret
+claudesecrets-cli --wipesecrets                   # Clear all secrets
+
+# Configuration  
+claudesecrets-cli -c                              # Show current settings
+claudesecrets-cli -V on                           # Enable voice notifications
+claudesecrets-cli -n off                          # Disable macOS notifications
+
+# Logging Control (NEW in v0.4.2)
+claudesecrets-cli -L minimal                      # Minimal logging (essential only)
+claudesecrets-cli -L normal                       # Normal logging (operational)  
+claudesecrets-cli -L debug                        # Debug logging (verbose)
+claudesecrets-cli --daemon-console off            # Silent daemon (default)
+claudesecrets-cli --daemon-console on             # Verbose daemon
+
+# Migration & Import
+claudesecrets-cli --migrate file-to-keychain      # Move secrets to keychain
+claudesecrets-cli --migrate --file /path/secrets  # Bulk import from file
+claudesecrets-cli --upgrade                       # Upgrade from old version
+```
+
+### Direct Settings (defaults commands)
+```bash
+# Log level control
+defaults write com.oemden.claudesecrets log_level -int 0      # minimal
+defaults write com.oemden.claudesecrets log_level -int 1      # normal
+defaults write com.oemden.claudesecrets log_level -int 2      # debug
+
+# Daemon console output
+defaults write com.oemden.claudesecrets daemon_console -bool false  # silent
+defaults write com.oemden.claudesecrets daemon_console -bool true   # verbose
+
+# Check current settings  
+defaults read com.oemden.claudesecrets
+```
+
+### Logging System (3-Level)
+- **Level 0 (minimal)**: Essential operations only - app launches, config processing, warnings
+- **Level 1 (normal)**: Operational details - file paths, notifications, detailed steps  
+- **Level 2 (debug)**: Full debugging - process monitoring, internal operations
+
+**Log Locations:**
+- Main logs: `/tmp/ClaudeAutoConfig.log` (filtered by level)
+- Error logs: `/tmp/ClaudeAutoConfig.error.log` (always written)
 
 ## Features (v0.4.2)
 

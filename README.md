@@ -17,8 +17,9 @@ A production-ready macOS daemon that automatically manages Claude Desktop/Code c
 - **Production Ready**: Complete package installer with upgrade preservation
 
 **Tested with**: 
-- Claude Desktop Version: "0.12.55"
-- Claude Code Version: "1.0.65"
+- **Claude Desktop Version: "0.12.55"**
+- **Claude Code Version: "1.0.65"**
+- **macOS Version: "macOS 15.5"**
 
 **⚠️ Always backup your configs - built-in backup system protects against data loss**
 
@@ -39,19 +40,36 @@ A production-ready macOS daemon that automatically manages Claude Desktop/Code c
 - **Logger System**: Preference-controlled verbosity with immediate effect
 - **Package Scripts**: XCreds-pattern installation with robust user detection and error handling
 
+### Achievements and TODOs
+
+- Achievements and TODOs can been seen here: **[Claude Secret Manager - Project Summary.md](./Claude%20Secret%20Manager%20-%20Project%20Summary.md)**
+
 ## Usage
 
 ### CLI Commands
 ```bash
+# Basic Options
+claudesecrets-cli -h, --help                     # Show help message
+claudesecrets-cli -v, --version                  # Show version information
+claudesecrets-cli -s, --status                   # Show daemon and configuration status
+claudesecrets-cli -c, --config                   # Show current configuration settings
+
 # Secrets Management
 claudesecrets-cli -a API_KEY=your_secret_value    # Add secret
+claudesecrets-cli -a VAR1=val1,VAR2=val2         # Add multiple secrets
+claudesecrets-cli -a API_KEY=secret123 -j "Production API key"  # Add with comment
 claudesecrets-cli -l keychain                     # List keychain secrets
 claudesecrets-cli -l file                         # List file secrets
 claudesecrets-cli -d API_KEY                      # Delete secret
+claudesecrets-cli -d VAR1,VAR2                    # Delete multiple secrets
+claudesecrets-cli -m keychain                     # Set storage mechanism (use with --add/--delete)
 claudesecrets-cli --wipesecrets                   # Clear all secrets
 
-# Configuration  
-claudesecrets-cli -c                              # Show current settings
+# Template & Configuration Generation
+claudesecrets-cli -t, --template                 # Create template from current Claude config
+claudesecrets-cli -g TEMPLATE OUTPUT             # Generate config from template and secrets
+
+# Configuration & Notifications
 claudesecrets-cli -V on                           # Enable voice notifications
 claudesecrets-cli -n off                          # Disable macOS notifications
 
@@ -62,10 +80,43 @@ claudesecrets-cli -L debug                        # Debug logging (verbose)
 claudesecrets-cli --daemon-console off            # Silent daemon (default)
 claudesecrets-cli --daemon-console on             # Verbose daemon
 
+# LaunchAgent Management
+claudesecrets-cli -I, --install                  # Install LaunchAgent plist (doesn't start)
+claudesecrets-cli -U, --uninstall                # Remove LaunchAgent plist (stops if running)
+claudesecrets-cli -E, --enable                   # Enable and start LaunchAgent daemon
+claudesecrets-cli -D, --disable                  # Disable and stop LaunchAgent daemon
+
+# System Management
+claudesecrets-cli -r, --reset                    # Reset to default claudesecrets settings
+claudesecrets-cli -R, --restore                  # Restore original Claude config and disable daemon
+claudesecrets-cli -u, --upgrade                  # Transfer keychain ownership to current binary
+
 # Migration & Import
 claudesecrets-cli --migrate file-to-keychain      # Move secrets to keychain
+claudesecrets-cli --migrate file-to-keychain --emptysecretfile  # Move and empty source file
 claudesecrets-cli --migrate --file /path/secrets  # Bulk import from file
-claudesecrets-cli --upgrade                       # Upgrade from old version
+
+# Emergency Commands
+claudesecrets-cli --noclaudesecrets              # Emergency disable: stop daemon, restore config
+claudesecrets-cli --wipesecrets                  # Delete ALL secrets from both file and keychain
+```
+
+### Handling Complex Values
+```bash
+# COMPLEX VALUES (use single quotes to protect special characters):
+claudesecrets-cli -a 'API_URL=https://api.example.com/v1' -m file
+claudesecrets-cli -a 'PASSWORD=P@ssw0rd123!&' -m file
+claudesecrets-cli -a 'MULTI=val1,API_URL=https://example.com' -m file
+
+# ALTERNATIVE METHODS for complex values:
+# Method 1: Single quotes (recommended)
+claudesecrets-cli -a 'DB_PASS=Very%$#@Complex!' -m file
+
+# Method 2: Double quotes with escaping  
+claudesecrets-cli -a "DB_PASS=Very%\\$#@Complex\\!" -m file
+
+# Method 3: Interactive mode (future feature)
+claudesecrets-cli --add-interactive -m file
 ```
 
 ### Direct Settings (defaults commands)
@@ -137,25 +188,29 @@ swift build -c release
 ### Basic Usage
 ```bash
 # Set up keychain storage (recommended)
-claudesecrets-cli -m keychain --add API_KEY=your_secret_key
-claudesecrets-cli -m keychain --add DATABASE_URL=your_connection_string
+claudesecrets-cli -m keychain -a API_KEY=your_secret_key
+claudesecrets-cli -m keychain -a DATABASE_URL=your_connection_string
 
 # Or use file storage
-claudesecrets-cli -m file --add API_KEY=your_secret_key
+claudesecrets-cli -m file -a API_KEY=your_secret_key
+
+# Create template from current Claude config
+claudesecrets-cli -t
 
 # List stored secrets (values hidden for security)
-claudesecrets-cli --list-secrets keychain
-claudesecrets-cli --list-secrets file
+claudesecrets-cli -l keychain
+claudesecrets-cli -l file
 
 # Check daemon status
-claudesecrets-cli --status
+claudesecrets-cli -s
 ```
 
 ### Setup Template
 
-**Template Creation (Automatic):**
-- Installation and first run automatically create template from your existing Claude config
-- No manual copying needed!
+**Template Creation:**
+- **Automatic**: Installation and first run automatically create template from your existing Claude config
+- **Manual**: Use `claudesecrets-cli -t` to create template from current Claude config
+- **Generate**: Use `claudesecrets-cli -g TEMPLATE OUTPUT` to generate config from template
 
 **Edit Template with Variables:**
 Simply use variable names directly in your template:
@@ -235,16 +290,17 @@ Claude Auto Config/
 ### Secrets Management
 ```bash
 # Add secrets (keychain recommended)
-claudesecrets-cli -m keychain --add API_KEY=abc123
-claudesecrets-cli -m keychain --add VAR1=val1,VAR2=val2
+claudesecrets-cli -m keychain -a API_KEY=abc123
+claudesecrets-cli -m keychain -a VAR1=val1,VAR2=val2
+claudesecrets-cli -m keychain -a API_KEY=secret123 -j "Production API key"  # With comment
 
 # Delete secrets  
-claudesecrets-cli -m keychain --delete API_KEY
-claudesecrets-cli -m keychain --delete VAR1,VAR2
+claudesecrets-cli -m keychain -d API_KEY
+claudesecrets-cli -m keychain -d VAR1,VAR2
 
 # List secrets (values hidden)
-claudesecrets-cli --list-secrets keychain
-claudesecrets-cli --list-secrets file
+claudesecrets-cli -l keychain
+claudesecrets-cli -l file
 
 # Switch storage mechanism
 defaults write com.oemden.claudesecrets secrets_mechanism "keychain"
@@ -261,15 +317,14 @@ claudesecrets-cli --migrate file-to-keychain --emptysecretfile
 # Bulk import from external file
 claudesecrets-cli --migrate --file /path/to/secrets.txt
 
-# Package upgrade migration (automatic during installation)
-claudesecrets-cli --upgrade --export    # Export before upgrade
-claudesecrets-cli --upgrade --import     # Import after upgrade
+# Package upgrade migration (transfer keychain ownership)
+claudesecrets-cli --upgrade              # Transfer keychain ownership to current binary
 
 # After migration, switch mechanism
 defaults write com.oemden.claudesecrets secrets_mechanism "keychain"
 
 # Verify migration success
-claudesecrets-cli --list-secrets keychain
+claudesecrets-cli -l keychain
 ```
 
 ### Emergency Recovery
@@ -284,23 +339,38 @@ claudesecrets-cli --wipesecrets
 ### Daemon Management & Logging (v0.4.2)
 ```bash
 # Status and configuration
-claudesecrets-cli --status
-claudesecrets-cli --config
+claudesecrets-cli -s, --status           # Show daemon and configuration status
+claudesecrets-cli -c, --config           # Show current configuration settings
 
 # LaunchAgent control
-claudesecrets-cli --install    # Install plist
-claudesecrets-cli --enable     # Start daemon
-claudesecrets-cli --disable    # Stop daemon
-claudesecrets-cli --uninstall  # Remove plist
+claudesecrets-cli -I, --install          # Install LaunchAgent plist (doesn't start)
+claudesecrets-cli -E, --enable           # Enable and start LaunchAgent daemon
+claudesecrets-cli -D, --disable          # Disable and stop LaunchAgent daemon
+claudesecrets-cli -U, --uninstall        # Remove LaunchAgent plist (stops if running)
+
+# System management
+claudesecrets-cli -r, --reset            # Reset to default claudesecrets settings
+claudesecrets-cli -R, --restore          # Restore original Claude config and disable daemon
+
+# Template management
+claudesecrets-cli -t, --template         # Create template from current Claude config
+claudesecrets-cli -g TEMPLATE OUTPUT     # Generate config from template and secrets
 
 # Logging control (NEW in v0.4.2)
-defaults write com.oemden.claudesecrets log_level "minimal"   # Errors only
-defaults write com.oemden.claudesecrets log_level "normal"    # Standard output
-defaults write com.oemden.claudesecrets log_level "debug"     # Verbose debugging
+claudesecrets-cli -L minimal             # Minimal logging (essential only)
+claudesecrets-cli -L normal              # Normal logging (operational)
+claudesecrets-cli -L debug               # Debug logging (verbose)
+claudesecrets-cli --daemon-console off   # Silent daemon (default)
+claudesecrets-cli --daemon-console on    # Verbose daemon
+
+# Alternative logging control via defaults
+defaults write com.oemden.claudesecrets log_level -int 0      # minimal
+defaults write com.oemden.claudesecrets log_level -int 1      # normal
+defaults write com.oemden.claudesecrets log_level -int 2      # debug
 
 # Notifications
-claudesecrets-cli --voice on
-claudesecrets-cli --notifications on
+claudesecrets-cli -V on                  # Enable voice notifications
+claudesecrets-cli -n off                 # Disable macOS notifications
 ```
 
 ## Configuration

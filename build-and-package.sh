@@ -12,6 +12,10 @@ PRODUCT_NAME="ClaudeSecretsManager"
 SCRIPT_DIR="$(dirname "$0")"
 PROJECT_DIR="$(pwd)"
 BUILD_CONFIG="release"
+CLAUDE_CODE_VERSION=$(claude --version | awk '{print $1}' 2>/dev/null || echo "Unknown")
+CLAUDE_DESKTOP_VERSION=$(osascript -e 'version of app "Claude"' 2>/dev/null || echo "Unknown")
+MACOS_VERSION="$(sw_vers -productName) $(sw_vers -productVersion)"
+RELEASE_DATE=$(date "+%B %Y")
 
 # Certificate names (update these with your actual certificate names)
 DEV_ID_APP_CERT="Developer ID Application: Olivier EMSELLEM (PV98B3794W)"
@@ -32,6 +36,17 @@ echo "🔄 Updating version in SharedConstants.swift..."
 sed -i '' "s/public static let version = \".*\"/public static let version = \"$GIT_VERSION\"/" Sources/SharedConstants/SharedConstants.swift
 echo "🔄 Updating version in Packages Scripts..."
 sed -i '' "s/Version \".*\"/Version \"$GIT_VERSION\"/" Packages/Scripts/*install
+# Update README
+echo "🔄 Updating Claude Desktop version in README..."
+sed -i '' "s/Claude Desktop Version: \".*\"/Claude Desktop Version: \"$CLAUDE_DESKTOP_VERSION\"/" ./README.md
+echo "🔄 Updating Claude Code version in README..."
+sed -i '' "s/Claude Desktop Version: \".*\"/Claude Desktop Version: \"$CLAUDE_DESKTOP_VERSION\"/" ./README.md
+echo "🔄 Updating macOS version in README..."
+sed -i '' "s/macOS Version: \".*\"/macOS Version: \"$MACOS_VERSION\"/" ./README.md
+echo "🔄 Updating What's New in README..."
+# sed -i '' "s/What's New in version \`.*\`/What's New in version \"$GIT_VERSION\"/" ./README.md
+sed -i '' "s/What's New in version [0-9.]* ([^)]*)/What's New in version $GIT_VERSION ($RELEASE_DATE)/" ./README.md
+
 echo "   ✅ Version updated to: $GIT_VERSION"
 
 # # Check if git working directory is clean (unless --force is used)

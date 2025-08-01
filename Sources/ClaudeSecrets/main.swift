@@ -57,13 +57,13 @@ struct Config {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 if let bundleID = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !bundleID.isEmpty {
-                    print("🔍 DEBUG: osascript found bundle ID '\(bundleID)' for app '\(appName)'")
+                    Logger.shared.debug("🔍 DEBUG: osascript found bundle ID '\(bundleID)' for app '\(appName)'")
                     return bundleID
                 }
             }
         } catch {
             // If osascript fails, fall back to hardcoded mappings
-            print("🔍 DEBUG: osascript failed for app '\(appName)', using fallback")
+            Logger.shared.debug("🔍 DEBUG: osascript failed for app '\(appName)', using fallback")
         }
         
         // Last resort fallback to known mappings (for safety)
@@ -74,7 +74,7 @@ struct Config {
         default: fallbackID = "com.unknown.app" // Will likely fail, but safe
         }
         
-        print("🔍 DEBUG: Using fallback bundle ID '\(fallbackID)' for app '\(appName)'")
+        Logger.shared.debug("🔍 DEBUG: Using fallback bundle ID '\(fallbackID)' for app '\(appName)'")
         return fallbackID
     }
     
@@ -241,7 +241,9 @@ struct Preferences {
         "manage_ClaudeCode_config",
         "shareClaudeDesktop_config_withClaudeCode",
         "always_secure_config",
-        "first_run_done"
+        "first_run_done",
+        "log_level",
+        "daemon_console"
     ]
     
     // Default values for mandatory keys
@@ -259,7 +261,9 @@ struct Preferences {
         "manage_ClaudeCode_config": true,
         "shareClaudeDesktop_config_withClaudeCode": true,
         "always_secure_config": true,
-        "first_run_done": true
+        "first_run_done": true,
+        "log_level": 0,
+        "daemon_console": false
     ]
     
     // Check if preferences are properly configured using 3-step logic
@@ -479,6 +483,20 @@ SECRET_TOKEN=your_secret_token_here
         return customDefaults.bool(forKey: "shareClaudeDesktop_config_withClaudeCode")
     }
     
+    // Log level setting
+    static var logLevel: Int {
+        return customDefaults.integer(forKey: "log_level") // Defaults to 0 (minimal) if not set
+    }
+    
+    // Daemon console output setting
+    static var daemonConsole: Bool {
+        // If never set, defaults to false (silent daemon)
+        if customDefaults.object(forKey: "daemon_console") == nil {
+            return false
+        }
+        return customDefaults.bool(forKey: "daemon_console")
+    }
+    
     // Process monitoring interval
     static var processMonitoringInterval: TimeInterval {
         let interval = customDefaults.double(forKey: "process_monitoring_interval")
@@ -540,6 +558,7 @@ SECRET_TOKEN=your_secret_token_here
     }
     
     static func printCurrentSettings() {
+        guard daemonConsole else { return }
         print("📋 Current Preferences:")
         print("   Claude Desktop Target: \(targetClaudeDesktopConfigFile)")
         print("   Claude Desktop Template: \(templateClaudeDesktopConfigFile)")
@@ -841,39 +860,155 @@ struct Logger {
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
     }
     
-    func log(_ level: LogLevel, _ message: String, file: String = #file, function: String = #function, line: Int = #line) {
+    func log(_ level: LogLevel, _ message: String, type: String = "INFO", file: String = #file, function: String = #function, line: Int = #line) {
+        let currentLogLevel = LogLevel(rawValue: Preferences.logLevel) ?? .minimal
+        
+        // Filter messages based on log level
+        let shouldLog: Bool
+        switch currentLogLevel {
+        case .minimal:
+            shouldLog = (level == .minimal || level == .normal) // Essential + operational messages
+        case .normal:
+            shouldLog = (level == .minimal || level == .normal) // Same as minimal for now
+        case .debug:
+            shouldLog = true // All messages including debug
+        }
+        
+        guard shouldLog else { return }
+        
         let timestamp = dateFormatter.string(from: Date())
         let filename = URL(fileURLWithPath: file).lastPathComponent
-        let logMessage = "[\(timestamp)] [\(level.rawValue)] [\(filename):\(line)] \(message)"
+        let logMessage = "[\(timestamp)] [\(type)] [\(filename):\(line)] \(message)"
         
-        print(logMessage)
+        // Always write to log file (filtered by level)
+        writeToLogFile(logMessage)
         
-        // Also write to log file if needed in the future
-        // writeToLogFile(logMessage)
+        // Handle error messages - write to separate error log
+        if type == "ERROR" {
+            writeToErrorLog(logMessage)
+        }
+        
+        // Only print to console if daemon_console is enabled
+        if Preferences.daemonConsole {
+            print(logMessage)
+        }
     }
     
+    private func writeToLogFile(_ message: String) {
+        let logPath = "\(NSHomeDirectory())/Library/Logs/claudesecrets/ClaudeAutoConfig.log"
+        let logDir = "\(NSHomeDirectory())/Library/Logs/claudesecrets"
+        
+        // Ensure log directory exists with proper permissions
+        try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        
+        if let data = (message + "\n").data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logPath) {
+                if let fileHandle = FileHandle(forWritingAtPath: logPath) {
+                    fileHandle.seekToEndOfFile()
+                    fileHandle.write(data)
+                    fileHandle.closeFile()
+                }
+            } else {
+                FileManager.default.createFile(atPath: logPath, contents: data, attributes: [.posixPermissions: 0o600])
+            }
+        }
+    }
+    
+    private func writeToErrorLog(_ message: String) {
+        let errorLogPath = "\(NSHomeDirectory())/Library/Logs/claudesecrets/ClaudeAutoConfig.error.log"
+        let logDir = "\(NSHomeDirectory())/Library/Logs/claudesecrets"
+        
+        // Ensure log directory exists with proper permissions
+        try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        
+        if let data = (message + "\n").data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: errorLogPath) {
+                if let fileHandle = FileHandle(forWritingAtPath: errorLogPath) {
+                    fileHandle.seekToEndOfFile()
+                    fileHandle.write(data)
+                    fileHandle.closeFile()
+                }
+            } else {
+                FileManager.default.createFile(atPath: errorLogPath, contents: data, attributes: [.posixPermissions: 0o600])
+            }
+        }
+    }
+    
+    // Convenience methods - will determine level based on message content
     func success(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
-        log(.success, message, file: file, function: function, line: line)
+        let level = determineLogLevel(message: message, defaultLevel: .minimal)
+        log(level, message, type: "SUCCESS", file: file, function: function, line: line)
     }
     
     func info(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
-        log(.info, message, file: file, function: function, line: line)
+        let level = determineLogLevel(message: message, defaultLevel: .normal)
+        log(level, message, type: "INFO", file: file, function: function, line: line)
     }
     
     func warning(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
-        log(.warning, message, file: file, function: function, line: line)
+        let level = determineLogLevel(message: message, defaultLevel: .minimal)
+        log(level, message, type: "WARNING", file: file, function: function, line: line)
     }
     
     func error(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
-        log(.error, message, file: file, function: function, line: line)
+        log(.minimal, message, type: "ERROR", file: file, function: function, line: line)
+    }
+    
+    func debug(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
+        log(.debug, message, type: "DEBUG", file: file, function: function, line: line)
+    }
+    
+    // Determine appropriate log level based on message content
+    private func determineLogLevel(message: String, defaultLevel: LogLevel) -> LogLevel {
+        // MINIMAL level messages (essential operations)
+        let minimalPatterns = [
+            "LAUNCHED", "TERMINATED", "KEYCHAIN TEST:", "Loading secrets using",
+            "Starting configuration cleanup", "Template processed successfully",
+            "Configuration cleaned successfully", "Config generation completed successfully",
+            "Template loaded, size:", "Made \\d+ replacements", "Found orphaned Claude config"
+        ]
+        
+        // NORMAL level messages (operational details)  
+        let normalPatterns = [
+            "Using CLI at:", "Voice notification:", "Starting template processing",
+            "Template path:", "Output path:", "Deleted config:", "Cleaned up orphaned",
+            "Replaced \\w+ in template", "Loaded \\d+ secrets from file",
+            "SwiftDialog exit code:", "Checking for existing Claude Code processes",
+            "Found existing Claude Code processes:", "Keychain entries are current",
+            "Checking if keychain upgrade needed", "Other Claude app running:"
+        ]
+        
+        // Check for MINIMAL patterns first
+        for pattern in minimalPatterns {
+            if message.range(of: pattern, options: .regularExpression) != nil {
+                return .minimal
+            }
+        }
+        
+        // Check for NORMAL patterns
+        for pattern in normalPatterns {
+            if message.range(of: pattern, options: .regularExpression) != nil {
+                return .normal
+            }
+        }
+        
+        // Default to the provided level
+        return defaultLevel
     }
 }
 
-enum LogLevel: String {
-    case success = "SUCCESS"
-    case info = "INFO"
-    case warning = "WARNING"
-    case error = "ERROR"
+enum LogLevel: Int {
+    case minimal = 0    // Only essential results (errors)
+    case normal = 1     // Default operational info (success, warnings, errors)
+    case debug = 2      // Full verbose debugging (all including info/debug)
+    
+    var stringValue: String {
+        switch self {
+        case .minimal: return "ERROR"
+        case .normal: return "INFO"
+        case .debug: return "DEBUG"
+        }
+    }
 }
 
 // MARK: - App Monitor
@@ -939,12 +1074,12 @@ class AppMonitor {
     
     private func checkForExistingProcesses() {
         Logger.shared.info("🔍 Checking for existing Claude Code processes on startup...")
-        Logger.shared.info("🔍 DEBUG: Process name to look for: '\(Config.targetExecutableName)'")
-        Logger.shared.info("🔍 DEBUG: Binary path to look for: '\(Config.targetExecutablePath)'")
+        Logger.shared.debug("🔍 DEBUG: Process name to look for: '\(Config.targetExecutableName)'")
+        Logger.shared.debug("🔍 DEBUG: Binary path to look for: '\(Config.targetExecutablePath)'")
         
         // Get current running processes
         let currentProcesses = getCurrentClaudeCodeProcesses()
-        Logger.shared.info("🔍 DEBUG: Found processes: \(currentProcesses)")
+        Logger.shared.debug("🔍 DEBUG: Found processes: \(currentProcesses)")
         
         if !currentProcesses.isEmpty {
             Logger.shared.info("🔍 Found existing Claude Code processes: \(currentProcesses)")
@@ -1031,7 +1166,7 @@ class AppMonitor {
         let expectedBundleID = Config.targetAppBundleID
         let actualBundleID = app.bundleIdentifier ?? "nil"
         
-        Logger.shared.info("🔍 DEBUG: App launched - expected: '\(expectedBundleID)', actual: '\(actualBundleID)'")
+        Logger.shared.debug("🔍 DEBUG: App launched - expected: '\(expectedBundleID)', actual: '\(actualBundleID)'")
         
         guard actualBundleID == expectedBundleID else {
             return
@@ -1084,7 +1219,7 @@ class AppMonitor {
             return
         }
         
-        Logger.shared.info("🔍 DEBUG: appDidLaunch triggered - calling runScript(phase: \"launch\")")
+        Logger.shared.debug("🔍 DEBUG: appDidLaunch triggered - calling runScript(phase: \"launch\")")
         
         // Run pre-launch script
         runScript(phase: "launch")
@@ -1098,10 +1233,10 @@ class AppMonitor {
         let expectedBundleID = Config.targetAppBundleID
         let actualBundleID = app.bundleIdentifier ?? "nil"
         
-        Logger.shared.info("🔍 DEBUG: App terminated - expected: '\(expectedBundleID)', actual: '\(actualBundleID)'")
+        Logger.shared.debug("🔍 DEBUG: App terminated - expected: '\(expectedBundleID)', actual: '\(actualBundleID)'")
         
         guard actualBundleID == expectedBundleID else {
-            Logger.shared.info("🔍 DEBUG: Ignoring termination of non-target app: \(actualBundleID)")
+            Logger.shared.debug("🔍 DEBUG: Ignoring termination of non-target app: \(actualBundleID)")
             return
         }
         
@@ -1139,13 +1274,13 @@ class AppMonitor {
     }
     
     private func runScript(phase: String) {
-        Logger.shared.info("🔍 DEBUG: runScript called with phase: \(phase)")
+        Logger.shared.debug("🔍 DEBUG: runScript called with phase: \(phase)")
         switch phase {
         case "launch":
-            Logger.shared.info("🔍 DEBUG: runScript calling processTemplate()")
+            Logger.shared.debug("🔍 DEBUG: runScript calling processTemplate()")
             processTemplate()
         case "quit":
-            Logger.shared.info("🔍 DEBUG: runScript calling restoreTemplate()")
+            Logger.shared.debug("🔍 DEBUG: runScript calling restoreTemplate()")
             restoreTemplate()
         default:
             break
@@ -1166,7 +1301,7 @@ class AppMonitor {
         let desktopRunning = isClaudeDesktopRunning()
         let codeRunning = isClaudeCodeRunning()
         
-        Logger.shared.info("🔍 DEBUG: Periodic check - Claude Desktop running: \(desktopRunning), Claude Code running: \(codeRunning)")
+        Logger.shared.debug("🔍 DEBUG: Periodic check - Claude Desktop running: \(desktopRunning), Claude Code running: \(codeRunning)")
         
         // Check for new process launches that need config creation
         checkForNewProcessLaunches(desktopRunning: desktopRunning, codeRunning: codeRunning)
@@ -1205,11 +1340,11 @@ class AppMonitor {
         let newProcesses = currentProcesses.subtracting(lastSeenProcesses)
         let terminatedProcesses = lastSeenProcesses.subtracting(currentProcesses)
         
-        Logger.shared.info("🔍 DEBUG: checkForNewProcessLaunches - current: \(currentProcesses), last seen: \(lastSeenProcesses), new: \(newProcesses), terminated: \(terminatedProcesses)")
+        Logger.shared.debug("🔍 DEBUG: checkForNewProcessLaunches - current: \(currentProcesses), last seen: \(lastSeenProcesses), new: \(newProcesses), terminated: \(terminatedProcesses)")
         
         // Handle process terminations
         if !terminatedProcesses.isEmpty {
-            Logger.shared.info("🔍 Claude Code process terminated: \(terminatedProcesses)")
+            Logger.shared.debug("🔍 Claude Code process terminated: \(terminatedProcesses)")
             
             // Check if Claude Desktop is still running
             if desktopRunning {
@@ -1225,7 +1360,7 @@ class AppMonitor {
         }
         
         if !newProcesses.isEmpty {
-            Logger.shared.info("🔍 New \(Config.targetExecutableName) process detected: \(newProcesses)")
+            Logger.shared.debug("🔍 New \(Config.targetExecutableName) process detected: \(newProcesses)")
             
             // Check if config file exists
             let outputPath = Preferences.targetClaudeDesktopConfigFile.expandingTildeInPath
@@ -1298,17 +1433,17 @@ class AppMonitor {
             let binaryPath = Config.targetExecutablePath
             let processName = Config.targetExecutableName
             
-            Logger.shared.info("🔍 DEBUG: getCurrentClaudeCodeProcesses - processName: '\(processName)', binaryPath: '\(binaryPath)'")
+            Logger.shared.debug("🔍 DEBUG: getCurrentClaudeCodeProcesses - processName: '\(processName)', binaryPath: '\(binaryPath)'")
             
             // Use same logic as isClaudeCodeRunning
             if processName == "sleep" {
                 // Testing mode - detect sleep command regardless of path
                 task.arguments = [processName]
-                Logger.shared.info("🔍 DEBUG: Using sleep mode - pgrep arguments: \(task.arguments!)")
+                Logger.shared.debug("🔍 DEBUG: Using sleep mode - pgrep arguments: \(task.arguments!)")
             } else {
                 // For claude and other executables, use process name
                 task.arguments = [processName]
-                Logger.shared.info("🔍 DEBUG: Using process name mode - pgrep arguments: \(task.arguments!)")
+                Logger.shared.debug("🔍 DEBUG: Using process name mode - pgrep arguments: \(task.arguments!)")
             }
             
             let pipe = Pipe()
@@ -1318,19 +1453,19 @@ class AppMonitor {
             try task.run()
             task.waitUntilExit()
             
-            Logger.shared.info("🔍 DEBUG: pgrep exit status: \(task.terminationStatus)")
+            Logger.shared.debug("🔍 DEBUG: pgrep exit status: \(task.terminationStatus)")
             
             if task.terminationStatus == 0 {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 let output = String(data: data, encoding: .utf8) ?? ""
-                Logger.shared.info("🔍 DEBUG: pgrep raw output: '\(output)'")
+                Logger.shared.debug("🔍 DEBUG: pgrep raw output: '\(output)'")
                 let pids = output.trimmingCharacters(in: .whitespacesAndNewlines)
                     .components(separatedBy: .newlines)
                     .filter { !$0.isEmpty }
-                Logger.shared.info("🔍 DEBUG: pgrep parsed PIDs: \(pids)")
+                Logger.shared.debug("🔍 DEBUG: pgrep parsed PIDs: \(pids)")
                 return Set(pids)
             } else {
-                Logger.shared.info("🔍 DEBUG: pgrep failed - no processes found")
+                Logger.shared.debug("🔍 DEBUG: pgrep failed - no processes found")
             }
         } catch {
             Logger.shared.error("❌ Failed to get current processes: \(error.localizedDescription)")
@@ -1630,11 +1765,11 @@ class AppMonitor {
             if processName == "sleep" {
                 // Testing mode - detect sleep command regardless of path
                 task.arguments = [processName]
-                Logger.shared.info("🔍 Checking for sleep processes")
+                Logger.shared.debug("🔍 Checking for sleep processes")
             } else {
                 // For claude and other executables, use process name
                 task.arguments = [processName]
-                Logger.shared.info("🔍 Checking for process name: \(processName)")
+                Logger.shared.debug("🔍 Checking for process name: \(processName)")
             }
             
             let pipe = Pipe()
@@ -1645,7 +1780,7 @@ class AppMonitor {
             task.waitUntilExit()
             
             let isRunning = task.terminationStatus == 0
-            Logger.shared.info("🔍 Process running: \(isRunning)")
+            Logger.shared.debug("🔍 Process running: \(isRunning)")
             return isRunning
         } catch {
             Logger.shared.error("❌ Failed to check if process is running: \(error.localizedDescription)")
@@ -1713,13 +1848,13 @@ class AppMonitor {
     }
     
     private func processTemplate() {
-        Logger.shared.info("🔍 DEBUG: processTemplate() started")
+        Logger.shared.debug("🔍 DEBUG: processTemplate() started")
         
         // Determine app type and get appropriate settings
         let appType = getAppType()
         let (managementEnabled, templatePath, outputPath) = getAppSettings(for: appType)
         
-        Logger.shared.info("🔍 DEBUG: appType=\(appType), managementEnabled=\(managementEnabled)")
+        Logger.shared.debug("🔍 DEBUG: appType=\(appType), managementEnabled=\(managementEnabled)")
         
         if !managementEnabled {
             Logger.shared.info("ℹ️  Config management disabled for \(appType) - skipping template processing")
@@ -1768,10 +1903,10 @@ class AppMonitor {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
                 process.arguments = ["Claude Desktop configuration injected"]
-                Logger.shared.info("🔍 DEBUG: About to call say process...")
+                Logger.shared.debug("🔍 DEBUG: About to call say process...")
                 try process.run()
                 process.waitUntilExit()
-                Logger.shared.info("🔍 DEBUG: Say process completed with exit code: \(process.terminationStatus)")
+                Logger.shared.debug("🔍 DEBUG: Say process completed with exit code: \(process.terminationStatus)")
             }
             
         } catch {
@@ -2411,9 +2546,9 @@ struct CLICommands {
             let launchAgentsDir = "\(NSHomeDirectory())/Library/LaunchAgents"
             try FileManager.default.createDirectory(atPath: launchAgentsDir, withIntermediateDirectories: true)
             
-            // Create Logs directory
-            let logsDir = "\(NSHomeDirectory())/Library/Logs"
-            try FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true)
+            // Create Logs directory with proper permissions
+            let logsDir = "\(NSHomeDirectory())/Library/Logs/claudesecrets"
+            try FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
             
             // Copy plist file from bundle
             try FileManager.default.copyItem(atPath: sourcePlistPath, toPath: launchAgentPath)
@@ -2428,8 +2563,7 @@ struct CLICommands {
         
         print("📝 This will create:")
         print("   ~/Library/LaunchAgents/com.oemden.claudesecrets.plist")
-        print("   ~/Library/Logs/ClaudeAutoConfig.log")
-        print("🚧 Implementation commented out - requires admin testing")
+        print("   ~/Library/Logs/claudesecrets/ClaudeAutoConfig.log")
     }
     
     static func uninstallLaunchAgent() {
@@ -2616,6 +2750,8 @@ struct CLICommands {
 let monitor = AppMonitor()
 
 // Keep the RunLoop alive
-Logger.shared.info("📡 Monitoring... Press Ctrl+C to stop")
-Logger.shared.info("ℹ️  Note: Notifications might not appear in terminal mode")
+if Preferences.daemonConsole {
+    Logger.shared.info("📡 Monitoring... Press Ctrl+C to stop")
+    Logger.shared.info("ℹ️  Note: Notifications might not appear in terminal mode")
+}
 RunLoop.current.run()

@@ -647,6 +647,7 @@ struct CLICommands {
             -V, --voice [on|off]          Enable/disable voice notifications
             -n, --notifications [on|off]  Enable/disable macOS notifications
             -L, --log-level [level]       Set logging verbosity: minimal|normal|debug
+            --daemon-console [on|off]     Enable/disable daemon console output
             -j COMMENT                     Specify comment string for keychain entries
         
         COMMANDS:
@@ -691,6 +692,7 @@ struct CLICommands {
             claudeautoconfig --migrate file-to-keychain --emptysecretfile
             claudeautoconfig --migrate --file /path/to/secrets.env
             claudeautoconfig --log-level minimal
+            claudeautoconfig --daemon-console off
             claudeautoconfig --noclaudesecrets
             claudeautoconfig --wipesecrets
         
@@ -785,6 +787,16 @@ struct CLICommands {
                     i += 1
                 } else {
                     print("❌ --log-level requires a value: minimal|normal|debug")
+                    return true
+                }
+                
+            case "--daemon-console":
+                if i + 1 < args.count {
+                    let value = args[i + 1]
+                    setDaemonConsole(value: value)
+                    i += 1
+                } else {
+                    print("❌ --daemon-console requires a value: on|off")
                     return true
                 }
                 
@@ -1053,6 +1065,26 @@ struct CLICommands {
         let defaults = UserDefaults(suiteName: SharedConstants.suiteName) ?? UserDefaults.standard
         defaults.set(enabled, forKey: "macos_notifications")
         print("📱 macOS notifications: \(enabled ? "ENABLED" : "DISABLED")")
+    }
+    
+    static func setDaemonConsole(value: String) {
+        let defaults = UserDefaults(suiteName: SharedConstants.suiteName) ?? UserDefaults.standard
+        
+        let enabled: Bool
+        switch value.lowercased() {
+        case "on", "true", "yes", "1":
+            enabled = true
+        case "off", "false", "no", "0":
+            enabled = false
+        default:
+            print("❌ Invalid daemon console setting: \(value)")
+            print("   Valid options: on, off")
+            return
+        }
+        
+        defaults.set(enabled, forKey: "daemon_console")
+        print("📺 Daemon console output: \(enabled ? "ENABLED" : "DISABLED")")
+        print("   \(enabled ? "Daemon will show logs in console" : "Daemon will be silent (logs to file only)")")
     }
     
     static func setLogLevel(value: String) {
@@ -1422,9 +1454,9 @@ struct CLICommands {
             <key>KeepAlive</key>
             <true/>
             <key>StandardOutPath</key>
-            <string>/tmp/claudesecrets.log</string>
+            <string>\(NSHomeDirectory())/Library/Logs/claudesecrets/claudesecrets.log</string>
             <key>StandardErrorPath</key>
-            <string>/tmp/claudesecrets.error.log</string>
+            <string>\(NSHomeDirectory())/Library/Logs/claudesecrets/claudesecrets.error.log</string>
         </dict>
         </plist>
         """

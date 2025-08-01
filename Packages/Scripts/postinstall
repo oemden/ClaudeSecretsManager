@@ -21,20 +21,6 @@ echo "Package: $PACKAGE_PATH"
 echo "Target: $TARGET"
 echo "Volume: $TARGET_VOLUME"
 
-# # Function to detect console user (XCreds pattern)
-# detect_console_user() {
-#     local console_user=""
-#     console_user=$(/bin/ls -l /dev/console 2>/dev/null | /usr/bin/awk '{ print $3 }')
-#     if [[ -n "$console_user" && "$console_user" != "root" ]]; then
-#         echo "$console_user"
-#     else
-#         # Fallback: try who command
-#         console_user=$(who | grep console | awk '{ print $1 }' | head -1)
-#         echo "$console_user"
-#     fi
-# }
-
-
 # Function to get user home directory
 get_user_home() {
     local username="$1"
@@ -84,13 +70,13 @@ if [[ -f "/tmp/ClaudeSecretsManager/com.oemden.claudesecrets.plist" ]]; then
     echo "   ✅ LaunchAgent plist installed: $plistPath"
     echo "🚀 Enabling LaunchAgent..."
     # sudo -u "$loggedInUser" launchctl load -w "${PLIST_DEST}"
-    # # ENABLE Agent
+    ## ENABLE Agent
     launchctl enable gui/$userID/com.oemden.claudesecrets                                                                                                                                                                                                                                                                                                                                                                                                               
-    # # LOAD Agent
+    ## LOAD Agent
     # launchctl bootstrap gui/503 /Users/$loggedInUser/Library/LaunchAgents/com.oemden.claudesecrets.plist                                                                                                                                                                                                                                                                                                                                                            
     launchctl bootstrap gui/$userID "$plistPath"
     # launchctl bootstrap gui/$userID /Users/$loggedInUser/Library/LaunchAgents/com.oemden.claudesecrets.plist
-    # # UNLOAD
+    ## UNLOAD
     # launchctl bootout gui/503 /Users/$loggedInUser/Library/LaunchAgents/com.oemden.claudesecrets.plist
 
     echo "   ✅ LaunchAgent enabled and started"
@@ -191,6 +177,12 @@ sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets first_run_done -
 sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets macos_notifications -bool true
 sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets manage_ClaudeCode_config -bool true
 sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets manage_ClaudeDesktop_config -bool true
+sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets log_level "normal"
+sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets voice_notifications -bool false
+sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_mechanism "keychain"
+sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets shareClaudeDesktop_config_withClaudeCode -bool true
+sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets target_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
+sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
 
 # Handle secrets_file - preserve existing if it exists, otherwise use default
 if [[ -n "$EXISTING_SECRETS_FILE" ]]; then
@@ -200,21 +192,15 @@ else
     sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_file "~/.claudesecrets/.claude_secrets"
 fi
 
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets secrets_mechanism "keychain"
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets shareClaudeDesktop_config_withClaudeCode -bool true
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets target_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets target_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config.json"
-
 # Handle template_claudedesktop_config_file - preserve existing if it exists, otherwise use default
 if [[ -n "$EXISTING_TEMPLATE_FILE" ]]; then
     sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets template_claudedesktop_config_file "$EXISTING_TEMPLATE_FILE"
+    sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets template_claudecode_config_file  "$EXISTING_TEMPLATE_FILE"
     echo "   🛡️  Preserved existing template_claudedesktop_config_file: $EXISTING_TEMPLATE_FILE"  
 else
     sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets template_claudedesktop_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
+    sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets template_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
 fi
-
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets template_claudecode_config_file "~/Library/Application Support/Claude/claude_desktop_config_template.json"
-sudo -u "$loggedInUser" defaults write com.oemden.claudesecrets voice_notifications -bool true
 
 # Set proper permissions on the preferences file
 PREFS_FILE="${USER_HOME}/Library/Preferences/com.oemden.claudesecrets.plist"

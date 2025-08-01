@@ -895,7 +895,12 @@ struct Logger {
     }
     
     private func writeToLogFile(_ message: String) {
-        let logPath = "/tmp/ClaudeAutoConfig.log"
+        let logPath = "\(NSHomeDirectory())/Library/Logs/claudesecrets/ClaudeAutoConfig.log"
+        let logDir = "\(NSHomeDirectory())/Library/Logs/claudesecrets"
+        
+        // Ensure log directory exists with proper permissions
+        try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        
         if let data = (message + "\n").data(using: .utf8) {
             if FileManager.default.fileExists(atPath: logPath) {
                 if let fileHandle = FileHandle(forWritingAtPath: logPath) {
@@ -904,13 +909,18 @@ struct Logger {
                     fileHandle.closeFile()
                 }
             } else {
-                FileManager.default.createFile(atPath: logPath, contents: data, attributes: nil)
+                FileManager.default.createFile(atPath: logPath, contents: data, attributes: [.posixPermissions: 0o600])
             }
         }
     }
     
     private func writeToErrorLog(_ message: String) {
-        let errorLogPath = "/tmp/ClaudeAutoConfig.error.log"
+        let errorLogPath = "\(NSHomeDirectory())/Library/Logs/claudesecrets/ClaudeAutoConfig.error.log"
+        let logDir = "\(NSHomeDirectory())/Library/Logs/claudesecrets"
+        
+        // Ensure log directory exists with proper permissions
+        try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        
         if let data = (message + "\n").data(using: .utf8) {
             if FileManager.default.fileExists(atPath: errorLogPath) {
                 if let fileHandle = FileHandle(forWritingAtPath: errorLogPath) {
@@ -919,7 +929,7 @@ struct Logger {
                     fileHandle.closeFile()
                 }
             } else {
-                FileManager.default.createFile(atPath: errorLogPath, contents: data, attributes: nil)
+                FileManager.default.createFile(atPath: errorLogPath, contents: data, attributes: [.posixPermissions: 0o600])
             }
         }
     }
@@ -2536,9 +2546,9 @@ struct CLICommands {
             let launchAgentsDir = "\(NSHomeDirectory())/Library/LaunchAgents"
             try FileManager.default.createDirectory(atPath: launchAgentsDir, withIntermediateDirectories: true)
             
-            // Create Logs directory
-            let logsDir = "\(NSHomeDirectory())/Library/Logs"
-            try FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true)
+            // Create Logs directory with proper permissions
+            let logsDir = "\(NSHomeDirectory())/Library/Logs/claudesecrets"
+            try FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
             
             // Copy plist file from bundle
             try FileManager.default.copyItem(atPath: sourcePlistPath, toPath: launchAgentPath)
@@ -2553,8 +2563,7 @@ struct CLICommands {
         
         print("📝 This will create:")
         print("   ~/Library/LaunchAgents/com.oemden.claudesecrets.plist")
-        print("   ~/Library/Logs/ClaudeAutoConfig.log")
-        print("🚧 Implementation commented out - requires admin testing")
+        print("   ~/Library/Logs/claudesecrets/ClaudeAutoConfig.log")
     }
     
     static func uninstallLaunchAgent() {

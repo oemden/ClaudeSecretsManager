@@ -1454,9 +1454,9 @@ struct CLICommands {
             <key>KeepAlive</key>
             <true/>
             <key>StandardOutPath</key>
-            <string>/tmp/claudesecrets.log</string>
+            <string>\(NSHomeDirectory())/Library/Logs/claudesecrets/claudesecrets.log</string>
             <key>StandardErrorPath</key>
-            <string>/tmp/claudesecrets.error.log</string>
+            <string>\(NSHomeDirectory())/Library/Logs/claudesecrets/claudesecrets.error.log</string>
         </dict>
         </plist>
         """
